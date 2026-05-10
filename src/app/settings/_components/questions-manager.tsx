@@ -182,6 +182,7 @@ function QuestionDialog({
   const [type, setType] = useState<QType>("text");
   const [pending, startTransition] = useTransition();
 
+  // Reset form fields when the dialog opens.
   useEffect(() => {
     if (open) {
       setLabel(question?.label ?? "");

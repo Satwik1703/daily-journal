@@ -115,6 +115,24 @@ Living state of the Habit_Log build. Updated at the end of each session. Stable 
 
 ---
 
+## ✅ Day 8 — repo + deploy-readiness fixes
+
+**Shipped:**
+- **GitHub repo created**: https://github.com/Satwik1703/daily-journal (public, `main` branch). All 7 days' work in initial commit `008ac9d`.
+- **Bug fix from earlier (libSQL)**: forced `@libsql/client/node` import (the default was resolving to the web entry under Turbopack, rejecting `file:` URLs). Moved task-related runtime constants (`TASK_KINDS`, `TASK_KIND_LABELS`, `TASK_KIND_HINTS`) from `db/queries/journal-tasks.ts` to `lib/task-meta.ts` so client components can't drag the DB client into the browser bundle. Added `serverExternalPackages: ["libsql", "@libsql/client"]` to `next.config.ts`. Added rule #7 to `AGENTS.md`.
+- **Production build (`npm run build`)** runs clean.
+- **Caught at build time**: `/habits` and `/settings` were being prerendered as static (`○`) because they don't read `searchParams`/`cookies`. The Vercel build would have frozen the build-time DB snapshot for those pages until a `revalidatePath` fired. Added `export const dynamic = "force-dynamic"` to both. Now: `ƒ /gym, ƒ /habits, ƒ /insights, ƒ /journal/[date], ƒ /settings` — all data routes server-render on demand.
+- **Lint pass**: 4 errors → 0 errors. Real fix: `journal-form.tsx` was assigning `stateRef.current = state` during render (anti-pattern); moved to a `useEffect`. Stylistic: demoted `react-hooks/set-state-in-effect` to `warn` in `eslint.config.mjs` (the 3 remaining warnings are intentional state-sync from server-revalidated props in dialogs and task rows). Removed unused imports in `db/queries/{gym,insights}.ts`.
+
+**State of the repo:**
+- 1 commit, `main` branch, pushed
+- `local.db`, `.env.local`, `node_modules`, `.next`, build/dev/lint logs all gitignored
+- Type-check ✓, lint ✓, build ✓ (prod-clean)
+
+**Resume here for Day 9: Deploy to Vercel + Turso**
+
+---
+
 ## 🎉 Build complete
 
 All 7 days of the original plan are shipped. The app at `d:\sathw\Experiments\Habit_Log` is fully usable end-to-end:

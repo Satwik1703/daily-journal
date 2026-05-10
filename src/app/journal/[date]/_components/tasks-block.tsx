@@ -72,6 +72,9 @@ function TaskRow({ task }: { task: JournalTask }) {
   const [, startTransition] = useTransition();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Sync local state when the parent re-renders this row with fresh server
+  // data after revalidatePath. The proper "key={task.id+text+done}" remount
+  // pattern works too but is more disruptive to the focused textarea.
   useEffect(() => {
     setText(task.text);
     setDone(task.done);

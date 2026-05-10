@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { habits, habitLogs, journalEntries } from "@/db/schema";
-import { and, between, gte, isNull } from "drizzle-orm";
+import { between, isNull } from "drizzle-orm";
 import { addDays, todayLocal, type DateString } from "@/lib/dates";
 
 export type DailyMetric = {

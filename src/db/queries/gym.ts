@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { workouts, muscleLogs } from "@/db/schema";
-import { and, between, desc, eq } from "drizzle-orm";
+import { between, desc, eq } from "drizzle-orm";
 import { addDays, todayLocal, type DateString } from "@/lib/dates";
 import { INTENSITY_WEIGHT, type Intensity, type MuscleGroup } from "@/lib/muscle-groups";
 

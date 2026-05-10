@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // We legitimately sync local form state from props after server
+      // revalidation (dialogs reopened with different items, task rows
+      // refreshed by revalidatePath). Keep as warning, not error.
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;

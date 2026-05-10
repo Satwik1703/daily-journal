@@ -1,4 +1,7 @@
 import { getHabitsSnapshot } from "@/db/queries/habits";
+
+export const dynamic = "force-dynamic";
+
 import { TodayToggles } from "./_components/today-toggles";
 import { HabitGrid } from "./_components/habit-grid";
 import { HabitList } from "./_components/habit-list";

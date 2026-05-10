@@ -46,5 +46,7 @@ next-env.d.ts
 *.db-wal
 *.db-shm
 
-# dev server log
+# dev server / build log
 dev.log
+build.log
+lint.log

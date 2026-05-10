@@ -47,7 +47,12 @@ export function JournalForm({
   const pendingScalarsRef = useRef<ScalarPatch>({});
   const answersDirtyRef = useRef(false);
   const stateRef = useRef(state);
-  stateRef.current = state;
+  // Keep the ref in sync with the latest state for use inside debounced timers
+  // that run outside the render cycle. (Updating refs during render is an
+  // anti-pattern; doing it in an effect is the canonical "use latest" pattern.)
+  useEffect(() => {
+    stateRef.current = state;
+  });
   const firstRenderRef = useRef(true);
 
   useEffect(() => {

@@ -1,4 +1,7 @@
 import { getActiveQuestions, getArchivedQuestions } from "@/db/queries/journal-questions";
+
+export const dynamic = "force-dynamic";
+
 import { QuestionsManager } from "./_components/questions-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";

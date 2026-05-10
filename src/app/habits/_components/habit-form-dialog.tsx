@@ -34,6 +34,7 @@ export function HabitFormDialog({
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
   const [pending, startTransition] = useTransition();
 
+  // Reset form fields when the dialog opens.
   useEffect(() => {
     if (open) {
       setName(habit?.name ?? "");
