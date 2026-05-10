@@ -27,7 +27,7 @@ export default function HabitsLoading() {
               <div key={i} className="flex items-center gap-2">
                 <Skeleton className="h-4 w-20" />
                 <div className="flex flex-1 gap-[3px]">
-                  {Array.from({ length: 30 }).map((_, j) => (
+                  {Array.from({ length: 15 }).map((_, j) => (
                     <Skeleton key={j} className="aspect-square flex-1 rounded-[2px]" />
                   ))}
                 </div>

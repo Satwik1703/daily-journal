@@ -6,9 +6,9 @@ import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { addDays, formatHumanDate, todayLocal } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import { DatePickerPopover } from "@/components/date-picker-popover";
-import { fetchJournalMonthStatus } from "@/app/actions/journal-month";
+import { fetchHabitsMonthStatus } from "@/app/actions/habits-month";
 
-export function DateStepper({ date }: { date: string }) {
+export function HabitsDateStepper({ date }: { date: string }) {
   const router = useRouter();
   const prev = addDays(date, -1);
   const next = addDays(date, 1);
@@ -18,7 +18,7 @@ export function DateStepper({ date }: { date: string }) {
   return (
     <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-4 py-3 backdrop-blur">
       <Link
-        href={`/journal/${prev}`}
+        href={`/habits/${prev}`}
         aria-label="Previous day"
         className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
@@ -27,8 +27,8 @@ export function DateStepper({ date }: { date: string }) {
 
       <DatePickerPopover
         selected={date}
-        onSelect={(d) => router.push(`/journal/${d}`)}
-        fetchMonthStatus={fetchJournalMonthStatus}
+        onSelect={(d) => router.push(`/habits/${d}`)}
+        fetchMonthStatus={fetchHabitsMonthStatus}
       >
         <span className="flex flex-col items-center gap-0.5 px-2 py-1 transition-colors hover:bg-muted/60 rounded-md">
           <span className="inline-flex items-center gap-1 text-base font-medium leading-tight">
@@ -42,7 +42,7 @@ export function DateStepper({ date }: { date: string }) {
       </DatePickerPopover>
 
       <Link
-        href={`/journal/${next}`}
+        href={`/habits/${next}`}
         aria-label="Next day"
         className={cn(
           "rounded-md p-2 transition-colors",

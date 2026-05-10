@@ -26,6 +26,12 @@ export const journalEntries = sqliteTable("journal_entries", {
   gratitude1: text("gratitude_1"),
   gratitude2: text("gratitude_2"),
   gratitude3: text("gratitude_3"),
+  // "Identity Reminders" — five short affirmations about who the user wants to be.
+  identity1: text("identity_1"),
+  identity2: text("identity_2"),
+  identity3: text("identity_3"),
+  identity4: text("identity_4"),
+  identity5: text("identity_5"),
   energy: integer("energy"),
   mood: integer("mood"),
   sleepQuality: integer("sleep_quality"),

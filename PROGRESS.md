@@ -167,6 +167,161 @@ Living state of the Habit_Log build. Updated at the end of each session. Stable 
 
 ---
 
+## ✅ Phase 2 · Day A — calendar + status palette foundation
+
+Plan: `C:\Users\Admin\.claude\plans\hey-now-let-s-go-sequential-jellyfish.md`. Phase A is foundation only — nothing visible in the running app yet; pieces wire in during Phase B.
+
+**Shipped:**
+- `src/lib/journal-status.ts` — `JournalStatus` union, `STATUS_META`, `STATUS_ORDER`, `statusBg(status)`. Two computation functions:
+  - `computeJournalStatus({ nonNegTotal, nonNegDone, goalsDone, secondaryDone, hasEntry })` — implements the user's exact rules (sum is completed-only).
+  - `computeHabitsStatus(doneCount, hadActiveHabits)` — raw count: ≥5 crazy, =4 great, =3 good, 1-2 avg, 0 bad, no-active-habits empty.
+- `src/app/globals.css` — added `--status-crazy/great/good/avg/bad/empty` OKLCH vars in both `:root` and `.dark` (dark variant slightly brighter for contrast on the deep-teal background). Matching `--color-status-*` mappings in `@theme inline` so `bg-status-crazy` etc. work as Tailwind classes.
+- `src/components/ui/calendar.tsx` — pure month-grid primitive. Sun-start, 6-row 42-cell matrix. Props: `month`, `selected`, `onSelect`, `cellRenderer`, `disableFuture`, `onPrevMonth`, `onNextMonth`. Today gets a primary ring, selected gets a foreground ring. Future days dimmed + disabled. Helpers exported: `monthKeyOf`, `firstOfMonth`, `shiftMonth`, `monthMatrix`.
+- `src/components/date-picker-popover.tsx` — base-ui `Popover` wrapper around `Calendar`. Accepts `fetchMonthStatus(monthAnchor) => Promise<Record<DateString, JournalStatus>>`; loads lazily on open + on month nav, memoizes via `loadedMonthsRef` (a `Set<monthKey>` so flipping months doesn't refetch). Legend footer renders 5 swatches with labels. Future-disable cap also caps month navigation so user can't browse into next month.
+
+**Notes:**
+- Base-ui `Popover.Trigger` renders a native `<button>` by default — children are placed inside. No `render` callback needed (different from Menu where we used `render={<Button … />}`).
+- The `useEffect` that syncs `month` state to the latest `selected` prop produces one `react-hooks/set-state-in-effect` warning. This is the same intentional state-sync exemption mentioned for Day 8 (3 existing warnings of the same kind). Acceptable.
+- `tsc --noEmit` clean. Lint: 0 errors, 1 warning (above).
+
+**Resume here for Phase B:** journal calendar wiring — `src/db/queries/journal-month.ts`, `src/app/actions/journal-month.ts`, rewire `date-stepper.tsx` to open `DatePickerPopover` driven by `fetchJournalMonthStatus`.
+
+---
+
+## ✅ Phase 2 · Day B — journal calendar wiring
+
+**Shipped:**
+- `src/db/queries/journal-month.ts` — `getJournalMonthStatus(start, end)` returning `Record<DateString, JournalStatus>`. Two SQL queries in parallel: dates with any `journal_entries` row, plus `journal_tasks` in range. Tasks aggregate per-date into `{ nonNegTotal, nonNegDone, goalsDone, secondaryDone }`. Status computed via the shared `computeJournalStatus`. Dates with neither entry nor tasks are omitted (callers treat as `empty`).
+- `src/app/actions/journal-month.ts` — `fetchJournalMonthStatus(monthAnchor)` server action. Range is widened by ±7 days around the month so the popover's 6-row grid (which spills into adjacent months) stays correctly colored as the user pages.
+- `src/app/journal/[date]/_components/date-stepper.tsx` — the center date label is now a `DatePickerPopover` trigger. Tapping it opens the calendar with status colors, current date highlighted, today ringed in primary, future days disabled. Picking a day calls `router.push('/journal/{date}')`. Sub-label flips between "Today" and "Tap to jump". Chevron-down icon next to the date as affordance.
+
+**Refactor:**
+- Pure date helpers `monthKeyOf`, `firstOfMonth`, `shiftMonth`, `monthMatrix` moved from `src/components/ui/calendar.tsx` (a `"use client"` module) into `src/lib/dates.ts`. This keeps them server-safe so the server action can import them without dragging React into a server module — same pattern as rule #7 in AGENTS.md for the DB client. `calendar.tsx` re-uses the lib helpers; `date-picker-popover.tsx` and `journal-month` action import directly from `@/lib/dates`.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `eslint` clean (1 expected `react-hooks/set-state-in-effect` warning on the intentional `month`-sync effect, same exemption pattern documented for Day 8).
+- `next build` clean: all 10 routes still build, `/journal/[date]` continues to render dynamically.
+
+**Resume here for Phase C:** Identity Reminders + journal section grouping. Schema migration adds `identity_1..5` columns to `journal_entries`; reorder `TASK_KINDS` to `[nonNegotiable, goal, secondary]`; add Identity card after Gratitude with 5 inputs and the default placeholders from the plan; introduce `<GroupBreak />` and reorganize `journal-form.tsx` into Mindset / Today's intent / Reflection groups (Tomorrow stays at the bottom).
+
+---
+
+## ✅ Phase 2 · Day C — Identity Reminders + journal grouping
+
+**Shipped:**
+- **Schema migration** `drizzle/migrations/0001_low_leo.sql` — adds `identity_1..5` (nullable text) to `journal_entries`. Applied to local `local.db` via `npm run db:migrate`. **Prod still pending** — re-run `npm run db:migrate` with prod Turso env vars before/after the next deploy (same procedure as Day 9).
+- `src/db/schema.ts` — five `identityN` columns added next to gratitude.
+- `src/app/actions/journal.ts` — `JournalPatch` type extended with `identity1..5?: string | null`. `clean()` handles them automatically; no other change to `saveJournalEntry`.
+- `src/app/journal/[date]/page.tsx` — passes the persisted identity values into `JournalForm.initial`.
+- `src/app/journal/[date]/_components/journal-form.tsx`:
+  - `JournalFormState` extended with `identity1..5`.
+  - `IDENTITY_PLACEHOLDERS` constant — 5 default suggestions ("I am the kind of person who…") that fade out as the user types. User can swap them later by editing this constant.
+  - New **Identity Reminders** card (5 `TextareaAutosize` inputs, same styling as Gratitude). Wired through `updateScalar` so it goes through the existing 1.5s autosave path. Save indicator already covers it.
+  - Sections reorganized into 3 groups separated by `<GroupBreak />` (thin hairline + small uppercase label):
+    - **Mindset** — Gratitude, Identity Reminders
+    - **Today's intent** — tasksBlock (Non-negotiables → Goals → Todos)
+    - **Reflection** — How was today (scales), Daily questions
+  - Tomorrow stays at the very bottom, ungrouped (it's about the next day).
+  - Fixed a typo while in there: "I'm greatful for ..." → "I'm grateful for ...".
+- `src/lib/task-meta.ts` — `TASK_KINDS` order changed from `[goal, nonNegotiable, secondary]` to `[nonNegotiable, goal, secondary]`. `TasksBlock` iterates this constant directly, so the card order on the page updates without any other change.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `eslint` clean (the single pre-existing `set-state-in-effect` warning on `date-picker-popover.tsx` is the only one).
+- `next build` clean — all 10 routes still build, `/journal/[date]` still dynamic.
+
+**Resume here for Phase D:** Habits route `/habits/[date]` + habits calendar. Generalize `getHabitsSnapshot({ anchor, windowDays })`, redirect `/habits` → `/habits/{today}`, build the new page, add the habits-month query + action, mirror the calendar popover, lock `AddHabitButton` off-today, filter habits by `createdAt <= anchor`.
+
+---
+
+## ✅ Phase 2 · Day D — Habits route `/habits/[date]` + habits calendar
+
+**Shipped:**
+- **Generalized snapshot.** `getHabitsSnapshot({ anchor?, windowDays? })` defaults to today/7. Return type fields: `anchor` (the date the page is centered on), `today`, `doneOnAnchorIds` (renamed from `doneTodayIds`), plus the existing `active/archived/windowLogs/windowDates`. Default window dropped from 30 to 7 to match the new design.
+- **/habits → redirect.** `src/app/habits/page.tsx` is now a client redirect to `/habits/{today}`, mirroring `/journal`. The old static `/habits` route is now a static redirect; the real work lives in `[date]`.
+- **/habits/[date] page.** Server component:
+  - Validates date, `today` alias redirects to `/habits/{todayLocal()}`, invalid → `notFound()`.
+  - Loads `getHabitsSnapshot({ anchor: date, windowDays: 7 })`.
+  - **Filters active habits by `createdAt <= date`** — habits don't show up on dates before they were created. (User asked for this: newly added habits should be visible only from the day they got added.)
+  - Renders `<HabitsDateStepper>`, the title block (date subtitle says "backfilling" off-today), `AddHabitButton` (disabled prop when off-today), then `TodayToggles` + `HabitGrid` + `HabitList`.
+  - Empty state has two copies: "No habits yet" on today vs "No habits existed on this date" on past dates.
+- **Habits month status.**
+  - `src/db/queries/habits-month.ts` — `getHabitsMonthStatus(start, end)`. Computes daily completed count + whether any habit was *active that day* (i.e. `createdAt <= date && (archivedAt is null OR archivedAt > date)`). Status via shared `computeHabitsStatus`. Iterates every day in range so the calendar can distinguish "bad" (had habits, did nothing) vs "empty" (no habits existed yet).
+  - `src/app/actions/habits-month.ts` — `fetchHabitsMonthStatus(monthAnchor)` widened by ±7 days to cover the calendar's leading/trailing days.
+- **`<HabitsDateStepper>`** — same shape as the journal stepper but pushes to `/habits/{date}` and feeds the habits status fetcher into `DatePickerPopover`.
+- **`<TodayToggles>` neutral wording.** Now takes `{ anchor, isToday, habits, doneIds }`. Card title flips between "Today" and "That day"; shows a "Backfilling" chip off-today. Tapping a habit still calls `toggleHabitForDate(habit.id, anchor)` — the action already accepts a date, so no action change.
+- **`<HabitGrid>` enhancements (also covers Phase E start).**
+  - Optional `anchor` prop drives the "ring" cell (defaults to today). Used on the dated page to highlight the selected date inside the 7-day strip.
+  - Habit name column: `truncate` removed; now `whitespace-normal break-words leading-tight`, width bumped to `w-[100px]`, rows aligned `items-start` so long names wrap cleanly instead of ellipsing. Header offset bumped to `pl-[108px]` to compensate.
+- **`<AddHabitButton>`** — accepts `disabled?: boolean`. Disabled state shows `opacity-50` + a tooltip "Adding habits is locked on past dates".
+- **`loading.tsx`** updated to draw 7 skeleton cells (was 30) so the flash matches the new layout.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `next build` clean. New route `ƒ /habits/[date]` (dynamic). Old `/habits` is now static (just the redirect).
+
+**Resume here for Phase E:** the habit-grid wrap is already in — Phase E remaining work is the **Insights habit timeline card** with configurable 7 / 15 / 30 / 90 ranges, plus PWA `VERSION` bump in `public/sw.js` and any last visual polish.
+
+---
+
+## ✅ Phase 2 · Day E — Insights habit timeline + PWA bump
+
+**Shipped:**
+- `src/app/insights/page.tsx`:
+  - `RANGES` extended from `[7, 30, 90]` to `[7, 15, 30, 90]`. The existing `RangeToggle` picks up the new option automatically (renders "15d").
+  - Loads `getHabitsSnapshot({ windowDays: range })` server-side and renders the shared `<HabitGrid />` underneath the **Habit completion** card. Same component as `/habits/[date]` for visual consistency — text wrapping, anchor ring, and all. Same `createdAt <= anchor` filter so habits don't appear in days before they existed.
+- `public/sw.js` — bumped `VERSION` from `habit-log-v1` → `habit-log-v2`. Installed phones will pull fresh shells on next activation. (Reminder: bump again on each deploy.)
+- Habit-grid wrap + 7-day default were already in as part of Phase D — no separate work needed here.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `eslint src/` → 0 errors. 4 warnings total: 1 new (date-picker-popover's intentional `month`-sync effect, same exemption as the existing 3 in `journal-form.tsx` and `questions-manager.tsx`).
+- `next build` clean. All 11 routes build, `/insights` is dynamic, `/habits` static (redirect only), `/habits/[date]` dynamic.
+
+---
+
+## ✅ Phase 2 · Day F — feedback polish pass
+
+User-driven follow-ups after Day E:
+
+**Shipped:**
+- **Typewriter placeholder on Identity Reminders.** New `IdentityInput` component in `journal-form.tsx`. Instead of native HTML placeholder (which disappears on first keystroke), the input renders a transparent overlay containing the typed prefix (`invisible` class) followed by the remaining placeholder characters in muted color. As the user types, the ghost suffix shrinks letter-by-letter, like a writing prompt being eaten by the cursor. Wraps and font/leading mirror the textarea exactly so the ghost lines up with the real text. Border + focus ring moved to the outer container so the layered structure behaves as one input.
+- **Tomorrow in its own group.** New section "Looking ahead" with the card now titled **"Set tomorrow up"** (was "Tomorrow"). Sits below Reflection as a 4th group.
+- **Future dates blank in calendar popovers.** `DatePickerPopover.cellRenderer` returns `null` for any date `> todayLocal()` — no status fill on future cells (still disabled + dimmed by the calendar primitive). Applies to both the journal and habits popovers.
+- **Habit grid cell size fixed.** `gridTemplateColumns` switched from `repeat(N, minmax(0, 1fr))` to `repeat(N, 1.75rem)` in both the header row and per-habit rows. Cells now size identically regardless of window length (7d on `/habits/[date]`, 15/30/90d on `/insights`).
+- **Habit grid tooltip.** New `formatShortDate(s)` helper in `src/lib/dates.ts` returning `"Mar 04"` style. The cell `title` is now `{habit.name} — {Mar 04}{ ✓}`.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `next build` clean — 11 routes.
+
+---
+
+## ✅ Phase 2 · Day F.1 — revert fixed cell size, switch habits window to 15
+
+- **Reverted** the fixed `1.75rem` cell width from Day F. `HabitGrid` is back to `gridTemplateColumns: repeat(N, minmax(0, 1fr))` on both the header row and per-habit rows, with `flex-1` restored on the cell grid. Cells fill the full row width again.
+- **`/habits/[date]` window: 7 → 15 days.** `page.tsx` calls `getHabitsSnapshot({ anchor: date, windowDays: 15 })`. Skeleton in `loading.tsx` matches (15 cells). `HabitGrid` title text reads "Last 15 days" automatically (it uses `windowDates.length`).
+- `tsc --noEmit` clean.
+
+---
+
+## 🎯 Phase 2 — feature complete
+
+Five-phase rollout done. The app now has:
+- A **calendar popover** on the journal and habits date bars with day-by-day status colors (Crazy/Great/Good/Avg/Bad/empty palette via shared CSS vars).
+- **Identity Reminders** — 5 affirmation slots persisted in `journal_entries` next to gratitude.
+- **Section grouping** on the journal page (Mindset / Today's intent / Reflection / Tomorrow).
+- **Past-date logging** for habits via `/habits/[date]`, with the new-habit button locked off-today and habits hidden from days before they were created.
+- **7-day rolling grid** (was 30) with proper text wrapping for long habit names.
+- A **configurable habit timeline** on Insights (7 / 15 / 30 / 90 days).
+
+**To deploy:**
+1. `npm run db:migrate` against the prod Turso URL (apply migration `0001_low_leo.sql`).
+2. `vercel --prod --yes` from this folder (or auto-deploy if GitHub is connected).
+
+---
+
 ## 🎉 Build complete
 
 All 7 days of the original plan are shipped. The app at `d:\sathw\Experiments\Habit_Log` is fully usable end-to-end:
@@ -187,7 +342,6 @@ All 7 days of the original plan are shipped. The app at `d:\sathw\Experiments\Ha
 - **Search** — full-text search across gratitude + tomorrow + journal answers (`fts5` virtual table in libSQL).
 - **Reorder UX for tasks/habits/questions** — drag-and-drop using the `position` column that's already in every table.
 - **Calendar/heatmap view of the journal** — see months at a glance with mood-tinted cells.
-- **Per-user timezone setting** — currently uses the server's local time for `todayLocal()`. Single-user app so usually fine, but if you travel the day boundary will shift on you.
 
 ---
 

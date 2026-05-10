@@ -15,12 +15,25 @@ export type JournalFormState = {
   gratitude1: string;
   gratitude2: string;
   gratitude3: string;
+  identity1: string;
+  identity2: string;
+  identity3: string;
+  identity4: string;
+  identity5: string;
   energy: number;
   mood: number;
   sleepQuality: number;
   tomorrowPlan: string;
   answers: Record<string, unknown>;
 };
+
+const IDENTITY_PLACEHOLDERS = [
+  "I am the kind of person who shows up before they feel ready.",
+  "I am the kind of person who keeps promises to myself.",
+  "I am the kind of person who chooses long-term over easy.",
+  "I am the kind of person who learns from every day.",
+  "I am the kind of person who builds with intention, not impulse.",
+] as const;
 
 const DEBOUNCE_MS = 1500;
 
@@ -117,56 +130,141 @@ export function JournalForm({
     <div className="space-y-4">
       <SaveIndicator pending={isPending} savedAgo={savedAgo} hasAnythingSaved={savedAt !== null} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-serif font-normal">Gratitude</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {([1, 2, 3] as const).map((n) => {
-            const key = `gratitude${n}` as const;
-            return (
-              <TextareaAutosize
-                key={key}
-                value={state[key]}
-                onChange={(e) => updateScalar(key, e.target.value)}
-                placeholder="Something you're grateful for…"
-                minRows={1}
-                className="font-serif w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base leading-relaxed shadow-xs outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground/60"
-              />
-            );
-          })}
-        </CardContent>
-      </Card>
+      {/* Group 1 — Mindset */}
+      <section className="space-y-4">
+        <GroupBreak label="Mindset" first />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-serif font-normal">Gratitude</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {([1, 2, 3] as const).map((n) => {
+              const key = `gratitude${n}` as const;
+              return (
+                <TextareaAutosize
+                  key={key}
+                  value={state[key]}
+                  onChange={(e) => updateScalar(key, e.target.value)}
+                  placeholder="I'm grateful for ..."
+                  minRows={1}
+                  className="font-serif w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base leading-relaxed shadow-xs outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground/60"
+                />
+              );
+            })}
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-serif font-normal">How was today?</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <ScaleField label="Energy" value={state.energy} onChange={(v) => updateScalar("energy", v)} hint="1 = drained · 10 = fully charged" />
-          <ScaleField label="Mood" value={state.mood} onChange={(v) => updateScalar("mood", v)} hint="1 = low · 10 = great" />
-          <ScaleField label="Sleep quality" value={state.sleepQuality} onChange={(v) => updateScalar("sleepQuality", v)} hint="last night" />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-serif font-normal">Identity Reminders</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {([1, 2, 3, 4, 5] as const).map((n) => {
+              const key = `identity${n}` as const;
+              return (
+                <IdentityInput
+                  key={key}
+                  value={state[key]}
+                  onChange={(v) => updateScalar(key, v)}
+                  placeholder={IDENTITY_PLACEHOLDERS[n - 1]}
+                />
+              );
+            })}
+          </CardContent>
+        </Card>
+      </section>
 
-      <QuestionsBlock questions={questions} answers={state.answers} onAnswer={updateAnswer} />
+      {/* Group 2 — Today's intent */}
+      <section className="space-y-4">
+        <GroupBreak label="Today's intent" />
+        {tasksBlock}
+      </section>
 
-      {tasksBlock}
+      {/* Group 3 — Reflection */}
+      <section className="space-y-4">
+        <GroupBreak label="Reflection" />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-serif font-normal">How was today?</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <ScaleField label="Energy" value={state.energy} onChange={(v) => updateScalar("energy", v)} hint="1 = drained · 10 = fully charged" />
+            <ScaleField label="Mood" value={state.mood} onChange={(v) => updateScalar("mood", v)} hint="1 = low · 10 = great" />
+            <ScaleField label="Sleep quality" value={state.sleepQuality} onChange={(v) => updateScalar("sleepQuality", v)} hint="last night" />
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-serif font-normal">Tomorrow</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <TextareaAutosize
-            value={state.tomorrowPlan}
-            onChange={(e) => updateScalar("tomorrowPlan", e.target.value)}
-            placeholder="What's the one thing that would make tomorrow a good day?"
-            minRows={3}
-            className="font-serif w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base leading-relaxed shadow-xs outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground/60"
-          />
-        </CardContent>
-      </Card>
+        <QuestionsBlock questions={questions} answers={state.answers} onAnswer={updateAnswer} />
+      </section>
+
+      {/* Group 4 — Looking ahead */}
+      <section className="space-y-4">
+        <GroupBreak label="Looking ahead" />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-serif font-normal">Set tomorrow up</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TextareaAutosize
+              value={state.tomorrowPlan}
+              onChange={(e) => updateScalar("tomorrowPlan", e.target.value)}
+              placeholder="What's the one thing that would make tomorrow a good day?"
+              minRows={3}
+              className="font-serif w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base leading-relaxed shadow-xs outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 placeholder:text-muted-foreground/60"
+            />
+          </CardContent>
+        </Card>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * Textarea with a "typewriter" placeholder: instead of vanishing on first
+ * keystroke, the placeholder text reveals the *remaining* characters in
+ * muted color behind the cursor, like a writing prompt that gets eaten as
+ * the user types. The typed prefix is rendered invisibly in the overlay so
+ * the ghost suffix lines up with the real cursor position.
+ */
+function IdentityInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+}) {
+  const ghost = value.length >= placeholder.length ? "" : placeholder.slice(value.length);
+  return (
+    <div className="relative rounded-md border border-input bg-background shadow-xs transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+      <TextareaAutosize
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        minRows={1}
+        className="font-serif relative z-10 block w-full resize-none rounded-md bg-transparent px-3 py-2 text-base leading-relaxed outline-none"
+      />
+      {ghost ? (
+        <div
+          aria-hidden
+          className="font-serif pointer-events-none absolute inset-0 px-3 py-2 text-base leading-relaxed whitespace-pre-wrap break-words text-muted-foreground/45"
+        >
+          <span className="invisible">{value}</span>
+          {ghost}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GroupBreak({ label, first = false }: { label: string; first?: boolean }) {
+  return (
+    <div className={cn("flex items-center gap-3 px-1", first ? "mt-2" : "mt-6")}>
+      <span className="h-px flex-1 bg-border/60" />
+      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
+        {label}
+      </span>
+      <span className="h-px flex-1 bg-border/60" />
     </div>
   );
 }

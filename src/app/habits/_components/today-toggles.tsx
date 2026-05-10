@@ -8,15 +8,17 @@ import { cn } from "@/lib/utils";
 import type { Habit } from "@/db/queries/habits";
 
 export function TodayToggles({
-  today,
+  anchor,
+  isToday,
   habits,
-  doneTodayIds,
+  doneIds,
 }: {
-  today: string;
+  anchor: string;
+  isToday: boolean;
   habits: Habit[];
-  doneTodayIds: string[];
+  doneIds: string[];
 }) {
-  const initial = new Set(doneTodayIds);
+  const initial = new Set(doneIds);
   const [optimisticDone, setOptimisticDone] = useOptimistic(
     initial,
     (current: Set<string>, update: { id: string; done: boolean }) => {
@@ -31,7 +33,14 @@ export function TodayToggles({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="font-serif text-lg font-normal">Today</CardTitle>
+        <CardTitle className="flex items-center justify-between font-serif text-lg font-normal">
+          <span>{isToday ? "Today" : "That day"}</span>
+          {!isToday ? (
+            <span className="font-sans text-[10px] uppercase tracking-wider text-muted-foreground">
+              Backfilling
+            </span>
+          ) : null}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
         {habits.map((h) => {
@@ -44,7 +53,7 @@ export function TodayToggles({
               onClick={() => {
                 startTransition(async () => {
                   setOptimisticDone({ id: h.id, done: !done });
-                  await toggleHabitForDate(h.id, today);
+                  await toggleHabitForDate(h.id, anchor);
                 });
               }}
               className={cn(

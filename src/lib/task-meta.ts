@@ -2,13 +2,15 @@
 // import without dragging the DB client (and its native bindings) into the
 // browser bundle.
 
-export const TASK_KINDS = ["goal", "nonNegotiable", "secondary"] as const;
+// Order matters — drives the on-page card order inside TasksBlock.
+// Non-negotiables come first so they read as the foundation of the day.
+export const TASK_KINDS = ["nonNegotiable", "goal", "secondary"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 export const TASK_KIND_LABELS: Record<TaskKind, string> = {
   goal: "Goals",
-  nonNegotiable: "Non-negotiables",
-  secondary: "Secondary",
+  nonNegotiable: "Non-Negotiables",
+  secondary: "Todos",
 };
 
 export const TASK_KIND_HINTS: Record<TaskKind, string> = {

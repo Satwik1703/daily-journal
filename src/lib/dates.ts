@@ -42,8 +42,45 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 export function formatHumanDate(s: DateString): string {
   const d = parseDate(s);
   return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** "Mar 04" — short tooltip format. */
+export function formatShortDate(s: DateString): string {
+  const d = parseDate(s);
+  return `${MONTHS_SHORT[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** YYYY-MM key for the month containing a date. */
+export function monthKeyOf(s: DateString): string {
+  return s.slice(0, 7);
+}
+
+/** First day of the month containing a date. */
+export function firstOfMonth(s: DateString): DateString {
+  return `${s.slice(0, 7)}-01`;
+}
+
+/** Shift a date by N calendar months (anchor falls on the 1st of the resulting month). */
+export function shiftMonth(s: DateString, delta: number): DateString {
+  const d = parseDate(firstOfMonth(s));
+  d.setMonth(d.getMonth() + delta);
+  return formatLocalYMD(d);
+}
+
+/** Sun-start 6-row 42-cell matrix of dates covering the month of `s`. */
+export function monthMatrix(s: DateString): DateString[] {
+  const first = parseDate(firstOfMonth(s));
+  const startOffset = first.getDay(); // 0 = Sun
+  const start = addDays(formatLocalYMD(first), -startOffset);
+  const out: DateString[] = [];
+  for (let i = 0; i < 42; i++) out.push(addDays(start, i));
+  return out;
 }

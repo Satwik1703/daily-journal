@@ -33,24 +33,31 @@ export async function getLogsInRange(start: DateString, end: DateString): Promis
 export type HabitsSnapshot = {
   active: Habit[];
   archived: Habit[];
+  /** The date the page is centered on. Today by default; a past date when backfilling. */
+  anchor: DateString;
   today: DateString;
-  doneTodayIds: Set<string>;
-  /** Map<habitId, Set<dateString>> for last `windowDays` days inclusive of today */
+  /** Habits that have been logged on `anchor`. */
+  doneOnAnchorIds: Set<string>;
+  /** Map<habitId, Set<dateString>> for the last `windowDays` ending on `anchor`. */
   windowLogs: Map<string, Set<DateString>>;
   windowDates: DateString[];
 };
 
-export async function getHabitsSnapshot(windowDays = 30): Promise<HabitsSnapshot> {
+export async function getHabitsSnapshot(
+  opts: { anchor?: DateString; windowDays?: number } = {},
+): Promise<HabitsSnapshot> {
   const today = todayLocal();
-  const start = addDays(today, -(windowDays - 1));
+  const anchor = opts.anchor ?? today;
+  const windowDays = opts.windowDays ?? 7;
+  const start = addDays(anchor, -(windowDays - 1));
   const [active, archived, rangeLogs] = await Promise.all([
     getActiveHabits(),
     getArchivedHabits(),
-    getLogsInRange(start, today),
+    getLogsInRange(start, anchor),
   ]);
 
   const windowLogs = new Map<string, Set<DateString>>();
-  const doneTodayIds = new Set<string>();
+  const doneOnAnchorIds = new Set<string>();
   for (const log of rangeLogs) {
     let set = windowLogs.get(log.habitId);
     if (!set) {
@@ -58,7 +65,7 @@ export async function getHabitsSnapshot(windowDays = 30): Promise<HabitsSnapshot
       windowLogs.set(log.habitId, set);
     }
     set.add(log.date);
-    if (log.date === today) doneTodayIds.add(log.habitId);
+    if (log.date === anchor) doneOnAnchorIds.add(log.habitId);
   }
 
   const windowDates: DateString[] = [];
@@ -66,7 +73,7 @@ export async function getHabitsSnapshot(windowDays = 30): Promise<HabitsSnapshot
     windowDates.push(addDays(start, i));
   }
 
-  return { active, archived, today, doneTodayIds, windowLogs, windowDates };
+  return { active, archived, anchor, today, doneOnAnchorIds, windowLogs, windowDates };
 }
 
 export async function findHabitById(id: string): Promise<Habit | null> {

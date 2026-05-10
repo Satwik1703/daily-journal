@@ -3,14 +3,17 @@ import { db } from "@/db/client";
 import { habitLogs, habits } from "@/db/schema";
 import { isNull } from "drizzle-orm";
 import { computeStreaks } from "@/lib/streaks";
+import { getHabitsSnapshot } from "@/db/queries/habits";
+import { formatLocalYMD } from "@/lib/dates";
 import { RangeToggle } from "./_components/range-toggle";
 import { MoodEnergyChart } from "./_components/mood-energy-chart";
 import { CompletionChart } from "./_components/completion-chart";
 import { StreaksGrid } from "./_components/streaks-grid";
 import { WordCloud } from "./_components/word-cloud";
+import { HabitGrid } from "@/app/habits/_components/habit-grid";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const RANGES = [7, 30, 90] as const;
+const RANGES = [7, 15, 30, 90] as const;
 type Range = (typeof RANGES)[number];
 
 function clampRange(input: string | string[] | undefined): Range {
@@ -28,6 +31,10 @@ export default async function InsightsPage({
 
   // Range data
   const data = await getRangeData(range);
+
+  // Snapshot for the configurable Habit Timeline section (filtered to habits
+  // that existed on or before each day they're shown on — same rule as /habits/[date]).
+  const habitsSnapshot = await getHabitsSnapshot({ windowDays: range });
 
   // Streaks (use ALL habit logs ever, not just window — streaks can extend beyond range)
   const [allActiveHabits, allLogs] = await Promise.all([
@@ -65,7 +72,7 @@ export default async function InsightsPage({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="font-serif text-lg font-normal">Mood, energy, sleep</CardTitle>
+          <CardTitle className="font-serif text-lg font-normal">Energy, Mood, Sleep</CardTitle>
         </CardHeader>
         <CardContent>
           <MoodEnergyChart metrics={data.metrics} />
@@ -80,6 +87,15 @@ export default async function InsightsPage({
           <CompletionChart completion={data.completion} perHabit={data.perHabit} range={range} />
         </CardContent>
       </Card>
+
+      <HabitGrid
+        habits={habitsSnapshot.active.filter(
+          (h) => formatLocalYMD(h.createdAt) <= habitsSnapshot.anchor,
+        )}
+        windowDates={habitsSnapshot.windowDates}
+        windowLogs={habitsSnapshot.windowLogs}
+        today={habitsSnapshot.today}
+      />
 
       <Card>
         <CardHeader className="pb-3">

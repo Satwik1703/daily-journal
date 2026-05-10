@@ -10,6 +10,11 @@ export type JournalPatch = {
   gratitude1?: string | null;
   gratitude2?: string | null;
   gratitude3?: string | null;
+  identity1?: string | null;
+  identity2?: string | null;
+  identity3?: string | null;
+  identity4?: string | null;
+  identity5?: string | null;
   energy?: number | null;
   mood?: number | null;
   sleepQuality?: number | null;
