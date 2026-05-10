@@ -115,6 +115,40 @@ Living state of the Habit_Log build. Updated at the end of each session. Stable 
 
 ---
 
+## ✅ Day 9 — DEPLOYED 🚀
+
+**Live at: https://daily-journal-phi-vert.vercel.app**
+
+**Shipped:**
+- **Turso prod DB** created via web dashboard (region `aws-ap-south-1`, name `daily-journal`). Credentials saved to gitignored `.env.production.local`.
+- Schema migrated to Turso prod via `npm run db:migrate` with prod env vars inline. Verified all 8 tables present.
+- **Vercel CLI** installed via `npm i -g vercel`. Auth via `vercel login` (GitHub device-code flow → Satwik1703).
+- Project linked to `satwik1703s-projects/daily-journal` on Vercel.
+- Env vars `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set on Production via `vercel env add ... --value ... --yes`.
+- `vercel --prod --yes` deployed; 56s build, deploy READY.
+- All 9 routes (incl. PWA artifacts) return 200 from the live URL.
+- Live journal page verified to render DB data without errors (Turso connection working).
+
+**Bug caught and fixed mid-deploy:**
+- First `vercel env add` via `echo X | vercel env add` injected a UTF-8 BOM (PowerShell pipe behavior) → Vercel build failed with `URL_INVALID: '﻿libsql://...'`. Removed and re-added with `--value "..."` flag, which avoids the encoding issue. Worth remembering for any future PowerShell → CLI piping.
+
+**Stable URLs:**
+- Production: https://daily-journal-phi-vert.vercel.app (project alias, won't change)
+- Latest deployment: https://daily-journal-ekpfrgvgf-satwik1703s-projects.vercel.app
+- Vercel inspector: https://vercel.com/satwik1703s-projects/daily-journal
+
+**To install on phone:**
+- Open the live URL on phone
+- iOS Safari: Share → Add to Home Screen
+- Android Chrome: menu → Install app
+- Service Worker activates on https → full offline support
+
+**Future deploys:**
+- Right now `vercel --prod --yes` from this folder = redeploy
+- For auto-deploy on `git push`, connect the GitHub repo in the Vercel project settings: vercel.com → daily-journal → Settings → Git → Connect repository → Satwik1703/daily-journal
+
+---
+
 ## ✅ Day 8 — repo + deploy-readiness fixes
 
 **Shipped:**

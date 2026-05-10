@@ -46,7 +46,11 @@ next-env.d.ts
 *.db-wal
 *.db-shm
 
-# dev server / build log
+# dev server / build / deploy logs
 dev.log
 build.log
 lint.log
+deploy.log
+
+# vercel project link (contains project + org IDs)
+.vercel
