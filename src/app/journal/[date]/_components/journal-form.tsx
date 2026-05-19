@@ -223,8 +223,9 @@ export function JournalForm({
  * Textarea with a "typewriter" placeholder: instead of vanishing on first
  * keystroke, the placeholder text reveals the *remaining* characters in
  * muted color behind the cursor, like a writing prompt that gets eaten as
- * the user types. The typed prefix is rendered invisibly in the overlay so
- * the ghost suffix lines up with the real cursor position.
+ * the user types. A hidden sizing twin in the same grid cell drives the
+ * container height so the ghost layer always fits — without it, the
+ * textarea sized to its (empty) value while the ghost overflowed.
  */
 function IdentityInput({
   value,
@@ -237,17 +238,23 @@ function IdentityInput({
 }) {
   const ghost = value.length >= placeholder.length ? "" : placeholder.slice(value.length);
   return (
-    <div className="relative rounded-md border border-input bg-background shadow-xs transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
-      <TextareaAutosize
+    <div className="grid rounded-md border border-input bg-background shadow-xs transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+      <div
+        aria-hidden
+        className="font-serif invisible col-start-1 row-start-1 px-3 py-2 text-base leading-relaxed whitespace-pre-wrap break-words"
+      >
+        {(value || placeholder) + "\n"}
+      </div>
+      <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        minRows={1}
-        className="font-serif relative z-10 block w-full resize-none rounded-md bg-transparent px-3 py-2 text-base leading-relaxed outline-none"
+        rows={1}
+        className="font-serif col-start-1 row-start-1 resize-none bg-transparent px-3 py-2 text-base leading-relaxed outline-none"
       />
       {ghost ? (
         <div
           aria-hidden
-          className="font-serif pointer-events-none absolute inset-0 px-3 py-2 text-base leading-relaxed whitespace-pre-wrap break-words text-muted-foreground/45"
+          className="font-serif pointer-events-none col-start-1 row-start-1 px-3 py-2 text-base leading-relaxed whitespace-pre-wrap break-words text-muted-foreground/45"
         >
           <span className="invisible">{value}</span>
           {ghost}

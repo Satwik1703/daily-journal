@@ -471,6 +471,27 @@ End-of-session housekeeping. No app behavior changes.
 
 ---
 
+## ✅ Phase 4 · Part 1 — CSS polish + new app icon
+
+User-reported issues from the installed PWA:
+
+**Shipped:**
+- **Identity Reminders placeholder overflow (mobile) fixed.** Previous `IdentityInput` used `TextareaAutosize` with an `absolute inset-0` ghost overlay. On narrow viewports the multi-line placeholder text wrapped to 2+ lines while the textarea remained sized to its (empty) value — the ghost text bled past the bottom border. Replaced with a CSS-grid sizing-twin pattern: a hidden mirror element (`invisible`, `whitespace-pre-wrap break-words`) sits in `col-start-1 row-start-1` and contains `value || placeholder`, so the container always grows to fit the longer of the two. Native `<textarea>` and the ghost overlay share the same grid cell. No more overflow regardless of placeholder length or viewport width. (See `src/app/journal/[date]/_components/journal-form.tsx:229-261`.)
+- **App icon redesigned.** Old icon was a serif letter "h" — looked weak on home screens. New mark is a 4-layer concentric composition: outer teal ring (`#4fa896`), mid lighter teal ring (`#7fc7b9`), inner amber ring (`#e0a96d`), amber filled center dot (`#f3c987`) on a dark-teal radial gradient. Reads as a habit-ring / progress-ring metaphor that ties the three features (journal, habits, pomodoro) together visually. Both `src/app/icon.tsx` (512×512) and `src/app/apple-icon.tsx` (180×180) updated with proportional sizes/stroke widths.
+- **PWA `VERSION` bumped `habit-log-v3 → habit-log-v4`** in `public/sw.js` so installed phones re-fetch `/icon` + `/apple-icon` on next SW activation. (iOS Safari additionally caches home-screen icons aggressively at install time — remove + reinstall to refresh the icon on iOS.)
+
+**Verification:**
+- Dev server (`npm run dev`) booted clean (`Ready in 2.5s`, no warnings).
+- User manually verified placeholder + new icon on local + mobile.
+
+**Deploy:**
+- No schema migration this part.
+- `vercel --prod --yes` after push.
+
+**Resume here for Phase 4 · Part 2:** awaiting user direction on the next item.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
