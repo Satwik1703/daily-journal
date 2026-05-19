@@ -438,6 +438,39 @@ User-driven follow-ups after Day A:
 
 ---
 
+## ✅ Phase 3 · Day A.2 — git history hygiene + prod deploy + repo cleanup
+
+End-of-session housekeeping. No app behavior changes.
+
+**Shipped:**
+- **Phase 2 commit amended** to drop the `Co-Authored-By: Claude` trailer. SHA changed `5866480` → `ee4a149`. Force-pushed to `origin/main` with `--force-with-lease`. Sole author across history is now `Satwik1703 <sathwikgaddam@gmail.com>`. **User preference: never append `Co-Authored-By: Claude …` to commits** — saved to auto-memory at `C:\Users\Admin\.claude\projects\d--sathw-Experiments\memory\feedback_no_claude_coauthor.md`. Default for every future commit on this repo.
+- **Phase 3 commit** `a6c9c9e` (`phase 3 - pomodoro timer`), 46 files / +4648 / -55. Pushed to `origin/main`. No co-author trailer.
+- **Prod migration applied.** `npm run db:migrate` against Turso (`daily-journal-satwik1703.aws-ap-south-1.turso.io`) loaded env vars from `.env.production.local` via PowerShell foreach + regex parser. `0002_chubby_nomad.sql` applied. `0000` + `0001` were already there from earlier deploys.
+- **Prod deployed** via `vercel --prod --yes`. Live at https://daily-journal-phi-vert.vercel.app. Inspect: https://vercel.com/satwik1703s-projects/daily-journal/6c1eUkcTjP4fkyHKaDwxUe6ZWsVe. Probed `/`, `/pomodoro`, `/pomodoro/{today}`, `/more`, `/insights?range=30` — all 200.
+- **Repo cleanup** commit `ed86b76`:
+  - Deleted unused Next.js scaffold svgs (`public/{file,globe,next,vercel,window}.svg`) — zero references in `src/`.
+  - Deleted `src/components/coming-soon.tsx` — Phase 1 placeholder, all routes are built out.
+  - `.gitignore` adds `.vscode/` and `.idea/` (IDE config stays local). User keeps their own `.vscode/settings.json` with project search excludes.
+  - `.gitignore` also adds `dev.err.log` to the existing log block.
+  - Tracked file count `141 → 135`. `tsc --noEmit` clean, `npm run build` clean (13 routes).
+
+**State at session end:**
+- Working tree clean — `git status --short` empty.
+- Local + remote `main` both at `ed86b76`. Linear history `ed86b76 → a6c9c9e → ee4a149 → 9929c2d → 9c0e7c6 → 008ac9d`.
+- Prod DB schema includes all 10 tables (incl. `pomodoro_categories` + `pomodoro_sessions`).
+- Live URL serves Pomodoro tab with seeded categories, animated timer, focus insights.
+- Dev server stopped at end of session.
+
+**GitHub contributors graph caveat:** Claude may still appear briefly on the Contributors page (https://github.com/Satwik1703/daily-journal/graphs/contributors) due to GitHub's lazy cache rebuild. No trailers remain in history; will drop off automatically. Initial commit `008ac9d` body still mentions "Built day-by-day with Claude Code" as plain text — does NOT affect contributors graph; left as-is.
+
+**Resume here for next session:**
+- App is feature-complete through Phase 3 · Day A (Pomodoro tab). User said this was "the first of several Phase 3 features" — waiting on direction for Day B / next feature.
+- If next feature touches schema: `npm run db:generate` → commit migration → after merge, `npm run db:migrate` with prod env (PowerShell parser pattern above works) → `vercel --prod --yes`.
+- If next feature touches PWA shell: bump `VERSION` in `public/sw.js` (current `habit-log-v3`) and update the `SHELL` array.
+- Auto-memory now contains the no-co-author rule; future commits / amends on this repo will not include the trailer by default.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
