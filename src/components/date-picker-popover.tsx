@@ -76,7 +76,7 @@ export function DatePickerPopover({
     if (!status || status === "empty") return null;
     return (
       <span
-        className="absolute inset-[2px] rounded-[5px] opacity-85"
+        className="absolute inset-[2px] rounded-[5px]"
         style={{ backgroundColor: statusBg(status) }}
       />
     );

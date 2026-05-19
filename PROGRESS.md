@@ -345,6 +345,99 @@ All 7 days of the original plan are shipped. The app at `d:\sathw\Experiments\Ha
 
 ---
 
+## ✅ Phase 3 · Day A — Pomodoro tab + insights
+
+Plan: `C:\Users\Admin\.claude\plans\okay-so-now-let-s-woolly-kahan.md`.
+
+**Shipped:**
+- **Schema migration `0002_chubby_nomad.sql`** — adds `pomodoro_categories` (id/name/emoji/color/position/archivedAt/createdAt) and `pomodoro_sessions` (id/date/startedAt/endedAt/durationMin/plannedMin/categoryId FK/description/source enum `timer|manual|partial`). Applied locally via `npm run db:migrate`. **Prod still pending — run `npm run db:migrate` against prod Turso env before next deploy.**
+- **Lib files (DB-free, client-safe):**
+  - `src/lib/pomodoro-meta.ts` — `POMO_DURATIONS` (50m=full, 30m=half), `pomoUnits()`, `fmtPomos()`, `fmtMinutes()`, `formatTimeSpan()`, `formatClock()`, `SOUND_OPTIONS` (bell/chime/digital/birds), `DEFAULT_CATEGORIES` (6 seeds).
+  - `src/lib/pomodoro-status.ts` — `computePomodoroStatus({pomos, hadAny})` returning shared `JournalStatus` palette (crazy ≥6 / great =5 / good 3-4 / avg 1-2 / bad =0 / empty).
+  - `src/lib/pomodoro-audio.ts` — **Web Audio synth** (no mp3 assets) with 4 sound profiles. Reliable, offline, no licensing. `primeAudio()` runs on Start tap to satisfy iOS gesture requirement.
+- **Queries:**
+  - `src/db/queries/pomodoro-categories.ts` — `getActiveCategories/getArchivedCategories/getAllCategories`, auto-seeds 6 defaults on first read when table is empty.
+  - `src/db/queries/pomodoro.ts` — `getPomodoroDay(date)` (sessions + per-category agg + hourMinutes[24]), `getPomodoroWindow(range)` (daily rows + totals + topCategories + hourHistogram + longestSession), `getPomodoroMonthStatus(start, end)`, `getAllSessionDates()` for streaks.
+  - `src/db/queries/settings.ts` — `getKv()`, `getPomodoroSoundId()`.
+- **Server actions:**
+  - `src/app/actions/pomodoro.ts` — `createSession({...source})`, `updateSession`, `deleteSession`.
+  - `src/app/actions/pomodoro-categories.ts` — full CRUD.
+  - `src/app/actions/pomodoro-month.ts` — `fetchPomodoroMonthStatus(monthAnchor)` widening ±7d (same pattern as journal/habits).
+  - `src/app/actions/settings.ts` — `setPomodoroSound(soundId)` with onConflictDoUpdate.
+- **Routes:**
+  - `/pomodoro` → client redirect to `/pomodoro/{today}`.
+  - `/pomodoro/[date]` → server component, dynamic. Loads categories + today + yesterday + soundId in parallel.
+  - `/more` → menu hub listing Gym + Settings cards (lucide Menu icon).
+  - `+ loading.tsx` for both pomodoro routes.
+- **Components (`/pomodoro/[date]/_components/`):**
+  - `timer-panel.tsx` — orchestrator. State machine `idle → running ↔ paused → completed`. `localStorage.pomodoro.activeSession` persistence + wall-clock recompute on mount (refresh-safe). Circular SVG sweep + tabular MM:SS + `animate-pulse-soft`. Stop dialog (Save partial / Discard / Cancel). Completion auto-saves to DB via `createSession`, plays 5s chime, opens description dialog (Skip or Save → `updateSession`). Category picker disables while running. Duration toggle (50/30) hidden while active.
+  - `time-span-bar.tsx` — horizontal progress bar over wall-clock window, computes per-half-hour tick marks with major (`:00`) labels (`5 PM`) and minor (`:30`) labels. "Now" marker.
+  - `category-picker.tsx` — horizontal chip row with active chip ring + tint from category color.
+  - `manual-session-dialog.tsx` — date+time+duration+category+description form, calls `createSession({source:"manual"})`.
+  - `day-stats-card.tsx` — Today vs Yesterday top metrics + delta arrow, per-category bars with category colors, 24-bar hourly strip with hour labels.
+  - `session-list.tsx` — colored category puck + source badge (timer/partial/manual) + time-span + duration + description, trailing delete with confirm dialog.
+  - `pomodoro-date-stepper.tsx` — mirrors journal/habits stepper with `DatePickerPopover` driven by `fetchPomodoroMonthStatus`.
+- **Bottom nav** — replaced Gym slot with Pomodoro (lucide `Timer`); old Settings tab becomes a real `/more` route (`Menu` icon). Final order: Journal · Habits · Pomodoro · Insights · More.
+- **Insights additions** (`/insights` page):
+  - "Focus" section appended after Gratitude themes.
+  - **Focus minutes per day** Recharts BarChart + total pomos / focus time / focus streak (days with ≥1 pomo, reuses `computeStreaks`).
+  - **Top categories** horizontal bar list (capped 6).
+  - **Best time of day** 24-bar hour histogram across full range.
+  - **Focus heatmap** month-grid blocks (Sun-start, 6-row) per month in range, status palette via `computePomodoroStatus` + `statusBg`. Server-side rendered.
+- **Settings additions:**
+  - `PomodoroCategoriesManager` — list + add/edit/archive/unarchive via DropdownMenu pattern. Mirrors `HabitList` exactly. Inline `CategoryFormDialog` with emoji suggestions + `PRESET_COLORS` swatches.
+  - `SoundPicker` — radio-style cards with Preview button per option (2.5s synth preview). Persists via `setPomodoroSound`.
+- **Globals:** new `--animate-pulse-soft` 1.6s ease-in-out keyframe utility for the breathing timer digits.
+- **PWA `VERSION` bumped `v2 → v3`** and SHELL updated to include `/pomodoro` + `/more`.
+
+**Decisions / behaviors:**
+- Categories are user-managed (CRUD) seeded with Work/Study/Read/Exercise/Creative/Other.
+- Pomo unit: 50min=1.0 pomo, 30min=0.6 pomo, 25min=0.5 pomo (`durationMin/50`). UI shows both pomos and minutes.
+- Stop dialog asks every time (Save partial / Discard).
+- Sound: 4 synthesized profiles (no mp3 files needed) — bell (sine bell), chime (C-E-G triad), digital (square pulse), birds (FM chirp). Persisted via `settings` KV key `pomodoro_sound`.
+- Backgrounding: wall-clock from `Date.now() - startedAt - pausedMs - (paused ? Date.now()-pauseStartedAt : 0)`. Refresh/close/lock all resume correctly; if elapsed ≥ planned on mount, completion fires immediately + saves to DB + plays chime.
+
+**Verification (all green):**
+- Migration applied; `node scripts/check-pomo.mjs` confirms both tables + 6 seeded categories present.
+- `tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 7 warnings (all `react-hooks/set-state-in-effect` — same accepted exemption documented for Day 8 + Day A).
+- `npm run build` clean. 13 routes total. New: `/pomodoro` (○ static redirect), `/pomodoro/[date]` (ƒ dynamic), `/more` (○ static).
+- Routes probed at `http://localhost:3000`: `/pomodoro` 200, `/pomodoro/{today}` 200 (rendering timer/category/manual keys), `/more` 200, `/settings` 200, `/insights?range=30` 200 (Focus section present).
+
+**Resume here for Phase 3 · Day B:** user said this is the first of several Phase 3 features. Next feature TBD — wait for user direction.
+
+---
+
+## ✅ Phase 3 · Day A.1 — pomodoro polish + bug-fix pass
+
+User-driven follow-ups after Day A:
+
+**Shipped:**
+- **Manual session dialog overflow fixed.** Inputs and the category chip row were bleeding past the popup on narrow viewports. Added `min-w-0 w-full max-w-full` on the form, every `Input` / `Textarea`, the chip wrapper, and the date+time grid. Switched the two-column row from `grid-cols-2` to explicit `grid-cols-[1fr_1fr]` with `min-w-0` on each cell so native `<input type=date>` / `<input type=time>` controls can shrink instead of pushing the popup wider than its max-width.
+- **Insights range threading hardened.** All Focus-section cards were already keyed off the `range` searchParam (`getPomodoroWindow(range)` etc.), but added `export const dynamic = "force-dynamic"` on `/insights/page.tsx` as belt-and-suspenders so toggle changes always re-render — matches the dynamic flag already on `/habits`, `/settings`, `/gym`, and `/pomodoro/[date]`.
+- **Focus heatmap palette aligned with the calendar.** `src/app/insights/_components/focus-month-grid.tsx` rewritten so every cell (in-range, out-of-range, future, empty, filled) uses `statusBg(status)` only — dropped the `var(--muted)` fallback. Today gets the same `ring-1 ring-primary/70` as the popover calendar primitive. Cell colors and legend swatches now share one source of truth: edits to `--status-*` CSS vars in `globals.css` propagate to all calendars and the heatmap together.
+- **Calendar / legend opacity mismatch fixed.** `date-picker-popover.tsx` cell renderer was using `opacity-85` on filled cells while the legend swatches rendered at full opacity, so the two never matched visually. Dropped the `opacity-85` — filled cells now match legend swatches exactly.
+- **Focus trend chart added** to the Insights Focus section, inserted **before** Top categories. New component `src/app/insights/_components/focus-trend-chart.tsx` — Recharts `AreaChart` with linearGradient fill, configurable category (chip row including an "All" chip and every active category with its own color/emoji), and a minutes/pomos unit toggle. Server-side: serializes the per-day `Map<string, DayCategoryAgg>` into a plain array per day (RSC can't serialize Maps) before passing to the client; client filters and renders without re-fetching. `getActiveCategories()` is now loaded in parallel with `getPomodoroWindow()` and `getAllSessionDates()` on the insights page.
+- **Timer animations actually visible now.** The previous round added the keyframes + utility classes, but two bugs hid them:
+  1. SVG `<g>` rotations used `transform-origin: center` without `transform-box: fill-box` — browsers defaulted to (0, 0) of the SVG viewport, so the rings spun in arcs off-canvas. Added `transform-box: fill-box` to every orbit / ring-wave / radial-pulse utility class in `globals.css`, plus inline `style={{ transformOrigin: "120px 120px", transformBox: "fill-box" }}` on each rotating `<g>` for extra robustness across engines.
+  2. Most ambient animations (rotating rings, breathing backdrop, orbit particles) were gated on `phase === "running"`, so the idle state looked like a plain clock face. Ungated the ambient layers so they move all the time — only the per-second tick-bump, per-minute flash, per-minute ring-wave, and the lead-pip glow are still phase-gated.
+  - Visibility bumped too: ring stroke-opacities raised 0.18 → 0.55, particles 1.5px → 3px at opacity 0.9, added a `glow-strong` SVG filter, ten orbiting sparks + six counter-rotating accent sparks each twinkling with staggered delay, perpetual `ring-wave-loop` (3.2 s), drift on the "Focusing" label.
+- **`globals.css`** gained `ring-wave-loop`, `spark-twinkle`, and beefed-up keyframes; also adjusted `minute-flash` to include `drop-shadow(0 0 14px var(--primary))` and a 1.05 scale.
+- **`.gitignore`** now includes `dev.err.log` alongside the other dev logs.
+
+**Decisions / notes:**
+- Web Audio synth still the sound source — no mp3 assets needed. Sound preview button in Settings primes the audio context (iOS gesture requirement).
+- Dark-variant `--status-*` palette was unified with the light variant in `globals.css` (user-edited): both modes now use the same OKLCH values for crazy / great / good / avg / bad / empty so calendars look identical across themes. Comments in the file still say "dark variant — slightly brighter", but the values intentionally match light.
+
+**Verification:**
+- `tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 9 warnings (all `react-hooks/set-state-in-effect` — same accepted exemption pattern documented for Day 8).
+- Routes probed: `/pomodoro/{today}` 200 (animation classes verified in rendered DOM), `/insights?range=7` 200 (Focus trend chart present), `/insights?range=90` 200, `/settings` 200.
+
+**Resume here for Phase 3 · Day B:** still waiting on user direction for the next Phase 3 feature.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

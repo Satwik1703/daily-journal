@@ -45,7 +45,7 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
       </CardHeader>
       <CardContent className="space-y-1">
         {tasks.length === 0 && !adding ? (
-          <p className="text-xs text-muted-foreground/70 italic">none yet — tap + to add</p>
+          <p className="text-xs text-muted-foreground/70 italic">Tap + to add</p>
         ) : null}
         {tasks.map((t) => (
           <TaskRow key={t.id} task={t} />

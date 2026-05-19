@@ -80,8 +80,8 @@
   --chart-4: oklch(0.70 0.18 25);
   --chart-5: oklch(0.60 0.12 130);
   /* Day-status palette. Tuned to sit on top of the calm base. */
-  --status-crazy: oklch(0.62 0.16 175);   /* vibrant teal — pinnacle */
-  --status-great: oklch(0.74 0.15 70);    /* warm amber — strong */
+  --status-crazy: oklch(74.857% 0.13774 221.65);   /* vibrant teal — pinnacle */
+  --status-great: oklch(86.71% 0.2939 142.346);    /* warm amber — strong */
   --status-good:  oklch(0.66 0.14 140);   /* soft green — positive */
   --status-avg:   oklch(0.75 0.10 90);    /* muted gold — meh */
   --status-bad:   oklch(0.62 0.16 25);    /* dusty red — attention */
@@ -122,12 +122,12 @@
   --chart-4: oklch(0.75 0.18 25);
   --chart-5: oklch(0.65 0.12 130);
   /* Day-status palette — dark variant. Slightly brighter for contrast. */
-  --status-crazy: oklch(0.70 0.15 175);
-  --status-great: oklch(0.76 0.16 70);
-  --status-good:  oklch(0.68 0.14 140);
-  --status-avg:   oklch(0.70 0.10 90);
-  --status-bad:   oklch(0.65 0.18 25);
-  --status-empty: oklch(0.30 0.01 220);
+   --status-crazy: oklch(74.857% 0.13774 221.65);   /* vibrant teal — pinnacle */
+  --status-great: oklch(86.71% 0.2939 142.346);    /* warm amber — strong */
+  --status-good:  oklch(0.66 0.14 140);   /* soft green — positive */
+  --status-avg:   oklch(0.75 0.10 90);    /* muted gold — meh */
+  --status-bad:   oklch(0.62 0.16 25);    /* dusty red — attention */
+  --status-empty: oklch(0.92 0.005 95);   /* near-white — nothing logged */
   --sidebar: oklch(0.19 0.01 220);
   --sidebar-foreground: oklch(0.94 0.01 100);
   --sidebar-primary: oklch(0.68 0.11 175);
@@ -154,5 +154,105 @@
   [data-slot="slider-thumb"] {
     width: 1.5rem !important;
     height: 1.5rem !important;
+  }
+}
+
+@layer utilities {
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.72; }
+  }
+  .animate-pulse-soft {
+    animation: pulse-soft 1.6s ease-in-out infinite;
+  }
+
+  @keyframes ring-wave {
+    0% { transform: scale(0.92); opacity: 0.85; }
+    80% { opacity: 0.08; }
+    100% { transform: scale(1.7); opacity: 0; }
+  }
+  .animate-ring-wave {
+    animation: ring-wave 1.6s ease-out forwards;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  @keyframes ring-wave-loop {
+    0% { transform: scale(0.95); opacity: 0.55; }
+    70% { opacity: 0.05; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+  .animate-ring-wave-loop {
+    animation: ring-wave-loop 3.2s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  @keyframes tick-bump {
+    0% { transform: scale(1); filter: brightness(1); }
+    40% { transform: scale(1.07); filter: brightness(1.45); }
+    100% { transform: scale(1); filter: brightness(1); }
+  }
+  .animate-tick-bump {
+    animation: tick-bump 0.42s ease-out;
+  }
+
+  @keyframes minute-flash {
+    0% { filter: brightness(1) drop-shadow(0 0 0 transparent); transform: scale(1); }
+    25% { filter: brightness(2.2) saturate(1.4) drop-shadow(0 0 14px var(--primary)); transform: scale(1.05); }
+    100% { filter: brightness(1) drop-shadow(0 0 0 transparent); transform: scale(1); }
+  }
+  .animate-minute-flash {
+    animation: minute-flash 0.9s ease-out;
+  }
+
+  @keyframes orbit-rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes orbit-rotate-rev {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(-360deg); }
+  }
+  .animate-orbit-slow {
+    animation: orbit-rotate 22s linear infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .animate-orbit-mid {
+    animation: orbit-rotate-rev 14s linear infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .animate-orbit-fast {
+    animation: orbit-rotate 8s linear infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  @keyframes radial-pulse {
+    0%, 100% { transform: scale(0.94); opacity: 0.45; }
+    50% { transform: scale(1.12); opacity: 0.85; }
+  }
+  .animate-radial-pulse {
+    animation: radial-pulse 3.6s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  @keyframes drift {
+    0%, 100% { transform: translateY(0); letter-spacing: 0.05em; }
+    50% { transform: translateY(-3px); letter-spacing: 0.12em; }
+  }
+  .animate-drift {
+    animation: drift 3.2s ease-in-out infinite;
+  }
+
+  @keyframes spark-twinkle {
+    0%, 100% { opacity: 0.3; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.4); }
+  }
+  .animate-spark {
+    animation: spark-twinkle 2.4s ease-in-out infinite;
   }
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, CheckSquare, BarChart3, Dumbbell, Settings } from "lucide-react";
+import { BookOpen, CheckSquare, BarChart3, Timer, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; matchPrefix: string; Icon: typeof BookOpen };
@@ -10,9 +10,9 @@ type NavItem = { href: string; label: string; matchPrefix: string; Icon: typeof 
 const items: NavItem[] = [
   { href: "/journal", label: "Journal", matchPrefix: "/journal", Icon: BookOpen },
   { href: "/habits", label: "Habits", matchPrefix: "/habits", Icon: CheckSquare },
+  { href: "/pomodoro", label: "Pomodoro", matchPrefix: "/pomodoro", Icon: Timer },
   { href: "/insights", label: "Insights", matchPrefix: "/insights", Icon: BarChart3 },
-  { href: "/gym", label: "Gym", matchPrefix: "/gym", Icon: Dumbbell },
-  { href: "/settings", label: "More", matchPrefix: "/settings", Icon: Settings },
+  { href: "/more", label: "More", matchPrefix: "/more", Icon: Menu },
 ];
 
 export function BottomNav() {

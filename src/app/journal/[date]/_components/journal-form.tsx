@@ -28,11 +28,11 @@ export type JournalFormState = {
 };
 
 const IDENTITY_PLACEHOLDERS = [
-  "I am the kind of person who shows up before they feel ready.",
-  "I am the kind of person who keeps promises to myself.",
-  "I am the kind of person who chooses long-term over easy.",
-  "I am the kind of person who learns from every day.",
-  "I am the kind of person who builds with intention, not impulse.",
+  "I keep every promise I make to myself. No excuses, no exceptions",
+  "My mind follows my command. I control my thoughts, emotions and actions",
+  "I speak with confidence, clarity and natural charm",
+  "I do what must be done whether I feel like it or not",
+  "I refuse to waste my time and potential",
 ] as const;
 
 const DEBOUNCE_MS = 1500;

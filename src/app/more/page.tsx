@@ -1,0 +1,57 @@
+import Link from "next/link";
+import { Dumbbell, Settings, ChevronRight } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+
+type MoreItem = {
+  href: string;
+  label: string;
+  description: string;
+  Icon: typeof Dumbbell;
+};
+
+const items: MoreItem[] = [
+  {
+    href: "/gym",
+    label: "Gym",
+    description: "Log workouts, see the muscle heatmap.",
+    Icon: Dumbbell,
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    description: "Daily questions, pomodoro categories, sound, and more.",
+    Icon: Settings,
+  },
+];
+
+export default function MorePage() {
+  return (
+    <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
+      <div>
+        <h1 className="font-serif text-2xl font-normal leading-tight">More</h1>
+        <p className="text-xs text-muted-foreground">Everything else.</p>
+      </div>
+
+      <div className="space-y-3">
+        {items.map(({ href, label, description, Icon }) => (
+          <Link key={href} href={href} className="block group">
+            <Card className="transition-colors group-hover:bg-muted/40">
+              <CardContent className="flex items-center gap-3 py-4">
+                <span className="flex size-10 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <Icon className="size-5" />
+                </span>
+                <span className="flex-1">
+                  <span className="block font-medium leading-tight">{label}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {description}
+                  </span>
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}

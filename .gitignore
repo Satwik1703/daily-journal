@@ -48,6 +48,7 @@ next-env.d.ts
 
 # dev server / build / deploy logs
 dev.log
+dev.err.log
 build.log
 lint.log
 deploy.log

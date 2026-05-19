@@ -1,13 +1,26 @@
 import { getActiveQuestions, getArchivedQuestions } from "@/db/queries/journal-questions";
+import {
+  getActiveCategories,
+  getArchivedCategories,
+} from "@/db/queries/pomodoro-categories";
+import { getPomodoroSoundId } from "@/db/queries/settings";
 
 export const dynamic = "force-dynamic";
 
 import { QuestionsManager } from "./_components/questions-manager";
+import { PomodoroCategoriesManager } from "./_components/pomodoro-categories-manager";
+import { SoundPicker } from "./_components/sound-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
 export default async function SettingsPage() {
-  const [active, archived] = await Promise.all([getActiveQuestions(), getArchivedQuestions()]);
+  const [active, archived, pomoActive, pomoArchived, soundId] = await Promise.all([
+    getActiveQuestions(),
+    getArchivedQuestions(),
+    getActiveCategories(),
+    getArchivedCategories(),
+    getPomodoroSoundId(),
+  ]);
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
       <div>
@@ -16,6 +29,10 @@ export default async function SettingsPage() {
       </div>
 
       <QuestionsManager active={active} archived={archived} />
+
+      <PomodoroCategoriesManager active={pomoActive} archived={pomoArchived} />
+
+      <SoundPicker currentSoundId={soundId} />
 
       <Card>
         <CardHeader className="pb-3">

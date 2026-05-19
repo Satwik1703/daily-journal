@@ -124,6 +124,44 @@ export const muscleLogs = sqliteTable(
   ],
 );
 
+// ---------- Pomodoro ----------
+
+export const pomodoroCategories = sqliteTable("pomodoro_categories", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  emoji: text("emoji"),
+  color: text("color").notNull().default("#10b981"),
+  position: integer("position").notNull().default(0),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const pomodoroSessions = sqliteTable(
+  "pomodoro_sessions",
+  {
+    id: text("id").primaryKey(),
+    date: text("date").notNull(), // YYYY-MM-DD (local-tz)
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp" }).notNull(),
+    durationMin: integer("duration_min").notNull(),
+    plannedMin: integer("planned_min").notNull(),
+    categoryId: text("category_id").references(() => pomodoroCategories.id, {
+      onDelete: "set null",
+    }),
+    description: text("description"),
+    source: text("source", { enum: ["timer", "manual", "partial"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    index("pomodoro_sessions_date").on(t.date),
+    index("pomodoro_sessions_category").on(t.categoryId),
+  ],
+);
+
 // ---------- Settings (single-row KV) ----------
 
 export const settings = sqliteTable("settings", {
