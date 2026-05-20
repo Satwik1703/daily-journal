@@ -2,9 +2,19 @@
 import { createClient } from "@libsql/client";
 const c = createClient({ url: "file:./local.db" });
 
-const habits = await c.execute("SELECT name, emoji, color, position FROM habits ORDER BY position");
+const habits = await c.execute(
+  "SELECT name, emoji, color, position, tracking_kind, daily_target, unit, pomo_category_id FROM habits ORDER BY position"
+);
 console.log(`habits (${habits.rows.length}):`);
-for (const r of habits.rows) console.log("  " + String(r.position).padStart(2) + ". " + r.emoji + " " + r.name);
+for (const r of habits.rows) {
+  const kind = r.tracking_kind;
+  const dt = r.daily_target;
+  const u = r.unit;
+  let suffix = `[${kind}]`;
+  if (kind === "number") suffix += ` ${dt}${u ? " " + u : ""}/day`;
+  if (kind === "pomodoro") suffix += ` ${dt}/day cat=${r.pomo_category_id?.slice(0, 4) ?? "?"}`;
+  console.log("  " + String(r.position).padStart(2) + ". " + r.emoji + " " + r.name + " " + suffix);
+}
 
 const cats = await c.execute("SELECT name, emoji, color, position FROM pomodoro_categories ORDER BY position");
 console.log(`\npomodoro_categories (${cats.rows.length}):`);

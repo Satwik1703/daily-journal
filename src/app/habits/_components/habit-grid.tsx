@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatShortDate, parseDate, type DateString } from "@/lib/dates";
+import { isHabitDoneOnDate, type HabitTrackingKind } from "@/lib/habit-meta";
 import type { Habit } from "@/db/queries/habits";
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -9,12 +10,19 @@ export function HabitGrid({
   habits,
   windowDates,
   windowLogs,
+  windowValuesByHabit,
+  windowPomoByHabit,
   today,
   anchor,
 }: {
   habits: Habit[];
   windowDates: DateString[];
-  windowLogs: Map<string, Set<DateString>>;
+  /** habitId -> array of dates with a binary habit_logs row. */
+  windowLogs: Record<string, string[]>;
+  /** habitId -> { date -> summed value } for number-kind habits. */
+  windowValuesByHabit: Record<string, Record<string, number>>;
+  /** habitId -> { date -> session count } for pomo-kind habits. */
+  windowPomoByHabit: Record<string, Record<string, number>>;
   today: DateString;
   /** Optional — when set, this cell gets the "selected" ring (defaults to today). */
   anchor?: DateString;
@@ -44,7 +52,10 @@ export function HabitGrid({
           </div>
 
           {habits.map((h) => {
-            const set = windowLogs.get(h.id) ?? new Set<DateString>();
+            const kind = h.trackingKind as HabitTrackingKind;
+            const logDates = new Set(windowLogs[h.id] ?? []);
+            const valueDays = windowValuesByHabit[h.id] ?? {};
+            const pomoDays = windowPomoByHabit[h.id] ?? {};
             return (
               <div key={h.id} className="flex items-start gap-2">
                 <div className="flex w-[100px] shrink-0 items-start gap-1.5 pt-px">
@@ -60,7 +71,14 @@ export function HabitGrid({
                   style={{ gridTemplateColumns: `repeat(${windowDates.length}, minmax(0, 1fr))` }}
                 >
                   {windowDates.map((d) => {
-                    const done = set.has(d);
+                    const hadLog = logDates.has(d);
+                    const daySumOrCount =
+                      kind === "number"
+                        ? valueDays[d] ?? 0
+                        : kind === "pomodoro"
+                          ? pomoDays[d] ?? 0
+                          : 0;
+                    const done = isHabitDoneOnDate(kind, h.dailyTarget, daySumOrCount, hadLog);
                     const isRing = d === ringDate;
                     return (
                       <span

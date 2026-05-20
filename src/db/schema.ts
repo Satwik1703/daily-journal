@@ -69,12 +69,44 @@ export const habits = sqliteTable("habits", {
   color: text("color").notNull().default("#10b981"),
   cadence: text("cadence", { enum: ["daily", "weekly"] }).notNull().default("daily"),
   targetPerWeek: integer("target_per_week"),
+  // Phase 6: how this habit gets marked "done" on a given day.
+  //   binary    -> habit_logs row exists for (habitId, date)
+  //   number    -> SUM(habit_value_logs.value) for date >= daily_target
+  //   pomodoro  -> COUNT(pomodoro_sessions) for category + date >= daily_target
+  trackingKind: text("tracking_kind", { enum: ["binary", "number", "pomodoro"] })
+    .notNull()
+    .default("binary"),
+  dailyTarget: real("daily_target"), // null for binary
+  unit: text("unit"),                 // "steps" / "pages" / etc — only for number
+  pomoCategoryId: text("pomo_category_id").references(
+    (): AnySQLiteColumn => pomodoroCategories.id,
+    { onDelete: "set null" },
+  ),
   position: integer("position").notNull().default(0),
   archivedAt: integer("archived_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
 });
+
+// Phase 6: numeric per-day deltas for `trackingKind = "number"` habits.
+// Multiple rows per day are allowed and summed on read.
+export const habitValueLogs = sqliteTable(
+  "habit_value_logs",
+  {
+    id: text("id").primaryKey(),
+    habitId: text("habit_id")
+      .notNull()
+      .references(() => habits.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    value: real("value").notNull(),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("habit_value_logs_habit_date").on(t.habitId, t.date)],
+);
 
 // Absence = not done. PK on (habitId, date) makes idempotent inserts trivial.
 export const habitLogs = sqliteTable(

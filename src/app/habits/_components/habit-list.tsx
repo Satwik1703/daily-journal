@@ -11,13 +11,22 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { HabitFormDialog } from "./habit-form-dialog";
+import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
 import { archiveHabit, unarchiveHabit } from "@/app/actions/habits";
 import type { Habit } from "@/db/queries/habits";
+import { TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-export function HabitList({ active, archived }: { active: Habit[]; archived: Habit[] }) {
+export function HabitList({
+  active,
+  archived,
+  categories,
+}: {
+  active: Habit[];
+  archived: Habit[];
+  categories: CategoryOption[];
+}) {
   const [editing, setEditing] = useState<Habit | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [, startTransition] = useTransition();
@@ -43,6 +52,7 @@ export function HabitList({ active, archived }: { active: Habit[]; archived: Hab
           <Row
             key={h.id}
             habit={h}
+            subtitle={trackingSummary(h, categories)}
             onEdit={() => setEditing(h)}
             onArchive={() => {
               startTransition(async () => {
@@ -57,6 +67,7 @@ export function HabitList({ active, archived }: { active: Habit[]; archived: Hab
               <Row
                 key={h.id}
                 habit={h}
+                subtitle={trackingSummary(h, categories)}
                 muted
                 onEdit={() => setEditing(h)}
                 onArchive={() => {
@@ -76,13 +87,25 @@ export function HabitList({ active, archived }: { active: Habit[]; archived: Hab
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         habit={editing}
+        categories={categories}
       />
     </Card>
   );
 }
 
+function trackingSummary(habit: Habit, categories: CategoryOption[]): string {
+  const kind = habit.trackingKind as HabitTrackingKind;
+  if (kind === "binary") return TRACKING_KIND_LABELS.binary;
+  if (kind === "number") {
+    return `${habit.dailyTarget ?? "?"} ${habit.unit ?? ""}/day`.trim();
+  }
+  const cat = categories.find((c) => c.id === habit.pomoCategoryId);
+  return `${habit.dailyTarget ?? "?"} ${cat?.name ?? "?"} sessions/day`;
+}
+
 function Row({
   habit,
+  subtitle,
   onEdit,
   onArchive,
   muted = false,
@@ -90,6 +113,7 @@ function Row({
   ArchiveIcon = Archive,
 }: {
   habit: Habit;
+  subtitle?: string;
   onEdit: () => void;
   onArchive: () => void;
   muted?: boolean;
@@ -110,7 +134,14 @@ function Row({
       >
         {habit.emoji ?? "•"}
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm">{habit.name}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm">{habit.name}</div>
+        {subtitle ? (
+          <div className="truncate text-[10px] uppercase tracking-wider text-muted-foreground">
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={

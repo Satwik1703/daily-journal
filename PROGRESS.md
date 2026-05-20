@@ -713,6 +713,132 @@ Yearly goals all have May–Dec 2026 monthly cascade children (largest-remainder
 
 ---
 
+## ✅ Phase 6 — Unified daily tracking on /habits
+
+Plan: `C:\Users\Admin\.claude\plans\now-let-s-build-a-partitioned-floyd.md`.
+
+### Context
+
+The 14-item stack split awkwardly across two tabs: 9 binary habits on `/habits`, 5 non-binary items (Walk, Read, Study, Create, Work) only on `/goals`. To know "what do I still owe today?" the user had to flip between tabs. Walk's mental model is "5,000 steps/day, 5 days/week" — the daily target was implicit inside a weekly goal target (25k). Phase 6 unifies tracking: every item is a habit on `/habits` with kind-aware rendering, and habit-linked goals derive their progress from those daily logs.
+
+### Schema migration `0004_skinny_cargill.sql` (additive)
+
+- `habits` table: 4 new columns
+  - `tracking_kind` enum default `"binary"` (`binary | number | pomodoro`)
+  - `daily_target` real nullable (e.g. 5000 steps, 1 session)
+  - `unit` text nullable (e.g. "steps", "pages")
+  - `pomo_category_id` text FK → `pomodoro_categories.id` (set null on delete)
+- New `habit_value_logs` table: `(id, habit_id FK cascade, date YYYY-MM-DD, value real, note?, created_at)`. Index on `(habit_id, date)`. Multiple rows per habit-day allowed; sum on read.
+- Unused legacy columns `cadence` + `targetPerWeek` left in place (no value change).
+- Local applied; prod migration runs additively before mirror.
+
+### Lib additions
+
+`src/lib/habit-meta.ts`:
+- `HABIT_TRACKING_KINDS`, `HabitTrackingKind` type
+- `TRACKING_KIND_LABELS`, `TRACKING_KIND_HINTS`
+- `isHabitDoneOnDate(kind, dailyTarget, daySumOrCount, hadLog)` — single helper used by snapshot, goal derivation, and per-row UI
+
+### Queries
+
+`src/db/queries/habits.ts`:
+- `HabitsSnapshot` extended with `windowValuesByHabit: Map<habitId, Map<date, sum>>` and `windowPomoByHabit: Map<habitId, Map<date, count>>` (5-way parallel fetch).
+- `doneOnAnchorIds` rebuilt via `isHabitDoneOnDate` so number + pomo habits flip "done" once the day's threshold is hit.
+- Two new range helpers: `getValueLogsInRange`, `getPomoSessionsInRange`.
+
+`src/db/queries/goals.ts` — `habitCountInRange` becomes kind-aware:
+- binary: COUNT `habit_logs`
+- number: count distinct dates where `SUM(habit_value_logs.value) >= dailyTarget`
+- pomodoro: count distinct dates where `COUNT(pomodoro_sessions for category) >= dailyTarget`
+
+All three return "qualifying days in the period". Habit-linked goal target keeps the same semantics across kinds.
+
+### Server actions
+
+`src/app/actions/habits.ts`:
+- `createHabit` + `updateHabit` accept the four new fields. Validates `dailyTarget > 0` for number/pomo, requires `pomoCategoryId` for pomo (and confirms it exists in `pomodoro_categories`).
+- `toggleHabitForDate` is now binary-only — throws if called against a non-binary habit.
+- **New `logHabitValue({ habitId, value, date?, note? })`** — append a delta to `habit_value_logs`. Validates habit is number-kind + value is non-zero.
+- **New `deleteHabitValueLog(id)`** for future "undo last entry" UI.
+- All mutations revalidate `/habits` AND `/goals` so cross-tab readouts stay live.
+
+### UI
+
+`src/app/habits/[date]/page.tsx`:
+- Loads `getActiveCategories()` in parallel with the snapshot (needed by the form).
+- Flattens the snapshot's `Map<Map>` shapes into plain `Record<string, Record<string, number>>` before passing to client subcomponents (rule #8 — Map doesn't survive RSC serialization).
+- Extracts anchor-day per-habit lookups (`valueAtAnchor`, `pomoCountAtAnchor`) for `TodayToggles`.
+
+`src/app/habits/_components/today-toggles.tsx` — rebuilt to dispatch by `habit.trackingKind`:
+- **`BinaryRow`** — original tap-to-tick + optimistic.
+- **`NumberRow`** — emoji + name + "{daySum}/{dailyTarget} {unit}" + `[+ Log]` button → `LogValueButton` mini dialog (decimal input + optional note). Done state painted with the habit color.
+- **`PomoRow`** — read-only "{sessionsToday}/{dailyTarget} sessions"; the entire row is a `<Link>` to `/pomodoro/{anchor}`. No manual session log here (defer to Phase 6.1).
+- All three share a `Glyph` (emoji or checkmark) + `hexToRgba` background tint.
+
+`src/app/habits/_components/habit-grid.tsx` — props now take `Record` shapes for binary log dates AND number/pomo per-day rollups. Cell "done" check is `isHabitDoneOnDate(kind, dailyTarget, daySumOrCount, hadLog)` so the rolling 15-day grid colors correctly for all kinds. Cell visual stays binary (filled = done).
+
+`src/app/habits/_components/habit-form-dialog.tsx` — new "How to track" radio grid (`Just tick / Log a number / Pomodoro sessions`). Conditional fields:
+- `number`: Daily target + Unit inputs
+- `pomodoro`: Category dropdown (from passed-in `categories`) + Sessions/day
+- `binary`: nothing extra
+
+`src/app/habits/_components/habit-list.tsx` + `add-habit-button.tsx` — accept and pass `categories` prop; Row subtitle shows tracking-kind summary (`5000 steps/day`, `1 Study sessions/day`, or `Just tick`).
+
+`src/app/insights/page.tsx` — `HabitGrid` invocation updated to flatten the snapshot's three `Map<Map>` shapes into Records.
+
+### Goal type cleanup in the seed
+
+`scripts/seed-habits-goals.mjs` is now the single source of truth for the canonical stack. All 14 items become **habits** with explicit `trackingKind`. All their seeded goals are `habit`-linked, and targets are uniform "days in period":
+
+| Item | Kind | Daily target | Weekly days |
+|---|---|---:|---:|
+| Wake up at 8 / Journal / Gym / Pray / Mantra / Meditate / No junk / Brush + Skincare / Sleep before 12 | binary | — | 3 or 5 |
+| Walk (5k) | number | 5000 steps | 5 |
+| Read (5 pages) | number | 5 pages | 5 |
+| Work | pomodoro (Work cat) | 4 sessions | 5 |
+| Study | pomodoro (Study cat) | 1 session | 5 |
+| Create | pomodoro (Create cat) | 1 session | 2 |
+
+Yearly = `weeklyDays × 52` (e.g. Walk 260, Create 104). Monthly cascade = largest-remainder split. Weekly W21 = `weeklyDays`. Math is identical regardless of kind because the kind just hides inside the habit row.
+
+Prod mirror mode now wipes 6 tables (added `habit_value_logs` to the list) before reseeding.
+
+`scripts/check-seed.mjs` prints `[trackingKind] dailyTarget unit/day` per habit.
+
+### PWA
+
+`public/sw.js` — `VERSION` bumped `habit-log-v6 → habit-log-v7`. SHELL unchanged.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 13 expected `react-hooks/set-state-in-effect` warnings (no new ones).
+- `npm run build` clean — same 18 routes.
+- Local DB nuked + remigrated + reseeded: 14 habits across all three kinds, 6 pomodoro categories, 14 yearly + 112 monthly + 14 weekly goals (160 rows total).
+- User to verify end-to-end manually before prod mirror + deploy.
+
+### Deploy (pending user verification)
+
+1. Local migration applied + seed verified ✓
+2. Commit + `git push origin main`
+3. Prod migration: `npm run db:migrate` with `.env.production.local` loaded — additive, safe (no data loss).
+4. Prod mirror: `node scripts/seed-habits-goals.mjs prod` — wipes 6 goal/habit tables + reseeds. Pre-approved destructive op per session memory.
+5. `vercel --prod --yes`.
+6. PWA: phones pick up `habit-log-v7` on next SW activation.
+
+### Things deferred to Phase 6.1+
+
+- Partial-fill rendering in HabitGrid cells (number/pomo days show opacity proportional to value/target).
+- "Today's deltas" history with per-entry remove on NumberRow long-press.
+- Manual pomo session log directly from the PomoRow (currently jumps to /pomodoro tab).
+- Stepper +/- quick-increment buttons for NumberRow.
+- Per-day target override (e.g. weekend Walk = 8k, weekday = 5k).
+- Drop unused `cadence` + `targetPerWeek` columns from habits.
+
+**Resume here for next session:** Phase 6 ready for prod once user confirms local works.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

@@ -1,16 +1,20 @@
 // Habit + goal seed for the Habit_Log app.
 //
+// Phase 6: every tracked thing is a habit (binary | number | pomodoro kind).
+// All goals are habit-linked; their target is "days in period that hit the
+// daily target". Same math for every kind. No more number/pomodoro goal
+// types in the seeded stack.
+//
 // Two modes:
 //
-//  - LOCAL (target=local): inserts 6 pomodoro categories + 9 habits +
+//  - LOCAL (target=local): inserts 6 pomodoro categories + 14 habits +
 //    14 yearly + 8*14 monthly + 14 weekly goals into a *fresh* local.db.
-//    Errors on a non-empty DB.
 //
-//  - PROD (target=prod): destructive mirror of the above onto Turso. Wipes
-//    the 5 goal/habit tables first (preserves journal entries + pomodoro
-//    sessions). Renames any existing pomodoro_categories row "Creative" →
-//    "Create" so the new Create-linked goals find their category, then
-//    skips inserting categories (reuses prod's existing ids).
+//  - PROD (target=prod): destructive mirror. Wipes goal_progress,
+//    goal_checklist, goals, habit_value_logs, habit_logs, habits.
+//    Renames any existing "Creative" → "Create" in pomodoro_categories,
+//    reuses prod's existing category ids. Preserves journal entries +
+//    pomodoro sessions.
 //
 // Usage:
 //   node scripts/seed-habits-goals.mjs            # local.db
@@ -51,31 +55,44 @@ function autoSplit(total, slices) {
   return Array.from({ length: slices }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
-// ---------- Master ordered list of all 13 items ----------
-// `kind`: "habit" (binary tick) | "pomo" (auto from pomodoro_sessions)
-//        | "number" (manual delta logging).
-// `position` follows user's chosen display order. Habits use the same global
-// index for /habits sort order (gaps OK).
+// ---------- Master ordered list of all 14 items ----------
+// All entries become habits. `trackingKind` decides what the /habits row
+// looks like and how the linked goal counts qualifying days.
+// `weeklyDays` is the number of days/week target → drives yearly = ×52,
+// monthly cascade split, and weekly = the value itself.
 const ITEMS = [
-  { position:  0, kind: "habit",  name: "Wake up at 8",     emoji: "☀️", color: "#0ea5e9", weekly: 3 },
-  { position:  1, kind: "habit",  name: "Journal",          emoji: "✍️", color: "#10b981", weekly: 5 },
-  { position:  2, kind: "habit",  name: "Gym",              emoji: "🏋️", color: "#10b981", weekly: 5 },
-  { position:  3, kind: "habit",  name: "Pray",             emoji: "🙏", color: "#f59e0b", weekly: 3 },
-  { position:  4, kind: "habit",  name: "Mantra",           emoji: "🕉️", color: "#a855f7", weekly: 5 },
-  { position:  5, kind: "pomo",   name: "Work",             emoji: "💼", color: "#0ea5e9", categoryName: "Work",   metric: "sessions", weekly: 20 },
-  { position:  6, kind: "habit",  name: "Meditate 5 min",   emoji: "🧘", color: "#a855f7", weekly: 3 },
-  { position:  7, kind: "pomo",   name: "Study",            emoji: "📖", color: "#0ea5e9", categoryName: "Study",  metric: "sessions", weekly: 5 },
-  { position:  8, kind: "number", name: "Walk (5k)",        emoji: "👟", color: "#84cc16", unit: "steps", weekly: 25000 },
-  { position:  9, kind: "number", name: "Read (5 pages)",   emoji: "📚", color: "#ec4899", unit: "pages", weekly: 25 },
-  { position: 10, kind: "habit",  name: "No junk",          emoji: "🥗", color: "#f43f5e", weekly: 5 },
-  { position: 11, kind: "pomo",   name: "Create",           emoji: "🎨", color: "#f59e0b", categoryName: "Create", metric: "sessions", weekly: 2 },
-  { position: 12, kind: "habit",  name: "Brush + Skincare", emoji: "🪥", color: "#0ea5e9", weekly: 5 },
-  { position: 13, kind: "habit",  name: "Sleep before 12",  emoji: "😴", color: "#64748b", weekly: 3 },
+  { position:  0, name: "Wake up at 8",     emoji: "☀️", color: "#0ea5e9",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 3 },
+  { position:  1, name: "Journal",          emoji: "✍️", color: "#10b981",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 5 },
+  { position:  2, name: "Gym",              emoji: "🏋️", color: "#10b981",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 5 },
+  { position:  3, name: "Pray",             emoji: "🙏", color: "#f59e0b",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 3 },
+  { position:  4, name: "Mantra",           emoji: "🕉️", color: "#a855f7",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 5 },
+  { position:  5, name: "Work",             emoji: "💼", color: "#0ea5e9",
+    trackingKind: "pomodoro", dailyTarget: 4, unit: null, categoryName: "Work", weeklyDays: 5 },
+  { position:  6, name: "Meditate 5 min",   emoji: "🧘", color: "#a855f7",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 3 },
+  { position:  7, name: "Study",            emoji: "📖", color: "#0ea5e9",
+    trackingKind: "pomodoro", dailyTarget: 1, unit: null, categoryName: "Study", weeklyDays: 5 },
+  { position:  8, name: "Walk (5k)",        emoji: "👟", color: "#84cc16",
+    trackingKind: "number", dailyTarget: 5000, unit: "steps", categoryName: null, weeklyDays: 5 },
+  { position:  9, name: "Read (5 pages)",   emoji: "📚", color: "#ec4899",
+    trackingKind: "number", dailyTarget: 5, unit: "pages", categoryName: null, weeklyDays: 5 },
+  { position: 10, name: "No junk",          emoji: "🥗", color: "#f43f5e",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 5 },
+  { position: 11, name: "Create",           emoji: "🎨", color: "#f59e0b",
+    trackingKind: "pomodoro", dailyTarget: 1, unit: null, categoryName: "Create", weeklyDays: 2 },
+  { position: 12, name: "Brush + Skincare", emoji: "🪥", color: "#0ea5e9",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 5 },
+  { position: 13, name: "Sleep before 12",  emoji: "😴", color: "#64748b",
+    trackingKind: "binary", dailyTarget: null, unit: null, categoryName: null, weeklyDays: 3 },
 ];
 
 // ---------- Pomodoro categories ----------
-// Same as DEFAULT_CATEGORIES from src/lib/pomodoro-meta.ts, but "Creative"
-// renamed to "Create" so the goal title and category name match.
+// Matches DEFAULT_CATEGORIES from src/lib/pomodoro-meta.ts (Create not Creative).
 const POMO_CATEGORIES = [
   { name: "Work",     emoji: "💼", color: "#0ea5e9" },
   { name: "Study",    emoji: "📚", color: "#a855f7" },
@@ -90,14 +107,10 @@ const CURRENT_MONTH_IDX = 4; // May (0-indexed)
 const CURRENT_WEEK_KEY = "2026-W21";
 const now = Math.floor(Date.now() / 1000);
 
-let counts = { categories: 0, habits: 0, yearGoals: 0, monthGoals: 0, weekGoals: 0, deleted: 0 };
-
+const counts = { categories: 0, habits: 0, yearGoals: 0, monthGoals: 0, weekGoals: 0, deleted: 0 };
 const categoryIdByName = new Map();
 
 if (arg === "prod") {
-  // ---------- 1a) Mirror mode: wipe + reuse categories ----------
-  // Rename any pre-existing "Creative" category to "Create" so goal inserts
-  // find a matching prod category id by name.
   const renamed = await client.execute({
     sql: `UPDATE pomodoro_categories SET name='Create' WHERE name='Creative'`,
   });
@@ -105,21 +118,23 @@ if (arg === "prod") {
     console.log(`  renamed Creative -> Create (${renamed.rowsAffected} row)`);
   }
 
-  // FK-safe order: goal_progress + goal_checklist cascade off goals; we
-  // delete them first explicitly anyway. habit_logs FK off habits cascades
-  // but we delete them up-front for clarity.
-  const tablesToWipe = ["goal_progress", "goal_checklist", "goals", "habit_logs", "habits"];
+  // FK-safe order. habit_value_logs cascades off habits but wipe explicitly.
+  const tablesToWipe = [
+    "goal_progress",
+    "goal_checklist",
+    "goals",
+    "habit_value_logs",
+    "habit_logs",
+    "habits",
+  ];
   for (const t of tablesToWipe) {
     const r = await client.execute({ sql: `DELETE FROM ${t}` });
     counts.deleted += r.rowsAffected ?? 0;
     console.log(`  wiped ${t}: ${r.rowsAffected ?? 0} rows`);
   }
 
-  // Build category map from existing prod categories — no new inserts.
   const cats = await client.execute(`SELECT id, name FROM pomodoro_categories`);
-  for (const row of cats.rows) {
-    categoryIdByName.set(row.name, row.id);
-  }
+  for (const row of cats.rows) categoryIdByName.set(row.name, row.id);
   for (const required of ["Work", "Study", "Create"]) {
     if (!categoryIdByName.has(required)) {
       throw new Error(`Prod missing required category: ${required}`);
@@ -127,7 +142,6 @@ if (arg === "prod") {
   }
   console.log(`  reusing prod pomodoro_categories: ${categoryIdByName.size}`);
 } else {
-  // ---------- 1b) Local mode: insert categories fresh ----------
   for (let i = 0; i < POMO_CATEGORIES.length; i++) {
     const c = POMO_CATEGORIES[i];
     const id = nanoid();
@@ -141,71 +155,70 @@ if (arg === "prod") {
   }
 }
 
-// ---------- 2) Per-item: create habit row (if needed) + year/month/week goals ----------
+// ---------- Per-item: insert habit + yearly + monthly + weekly goal ----------
 for (const item of ITEMS) {
-  const yearTarget = item.weekly * 52;
-  const pos = item.position;
-
-  // Habit row (only for habit-linked items)
-  let habitId = null;
-  if (item.kind === "habit") {
-    habitId = nanoid();
-    await client.execute({
-      sql: `INSERT INTO habits (id, name, emoji, color, cadence, position, created_at)
-            VALUES (?, ?, ?, ?, 'daily', ?, ?)`,
-      args: [habitId, item.name, item.emoji, item.color, pos, now],
-    });
-    counts.habits++;
-  }
-
+  const habitId = nanoid();
   let pomoCategoryId = null;
-  if (item.kind === "pomo") {
+  if (item.trackingKind === "pomodoro") {
     pomoCategoryId = categoryIdByName.get(item.categoryName);
     if (!pomoCategoryId) throw new Error(`Missing pomo category: ${item.categoryName}`);
   }
 
-  const goalType = item.kind === "habit" ? "habit" : item.kind === "pomo" ? "pomodoro" : "number";
-  const unit = item.kind === "number" ? item.unit
-             : item.kind === "pomo" && item.metric === "minutes" ? "min"
-             : null;
+  // Habit row — every item, regardless of tracking kind.
+  await client.execute({
+    sql: `INSERT INTO habits
+          (id, name, emoji, color, cadence, tracking_kind, daily_target, unit, pomo_category_id, position, created_at)
+          VALUES (?, ?, ?, ?, 'daily', ?, ?, ?, ?, ?, ?)`,
+    args: [
+      habitId,
+      item.name,
+      item.emoji,
+      item.color,
+      item.trackingKind,
+      item.dailyTarget,
+      item.unit,
+      pomoCategoryId,
+      item.position,
+      now,
+    ],
+  });
+  counts.habits++;
 
-  // Year goal
+  // All goals are habit-linked. Target = days in period that hit dailyTarget.
+  // yearly = weeklyDays * 52; monthly = autoSplit(yearly, 12); weekly = weeklyDays.
+  const yearTarget = item.weeklyDays * 52;
+  const monthSplits = autoSplit(yearTarget, 12);
+
   const yearGoalId = nanoid();
   await client.execute({
     sql: `INSERT INTO goals
           (id, period, period_key, parent_id, title, emoji, color, type, target_value, unit, habit_id, pomo_category_id, pomo_metric, status, position, created_at)
-          VALUES (?, 'year', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-    args: [
-      yearGoalId, YEAR, item.name, item.emoji, item.color, goalType,
-      yearTarget, unit, habitId, pomoCategoryId, item.metric ?? null, pos, now,
-    ],
+          VALUES (?, 'year', ?, NULL, ?, ?, ?, 'habit', ?, NULL, ?, NULL, NULL, 'active', ?, ?)`,
+    args: [yearGoalId, YEAR, item.name, item.emoji, item.color, yearTarget, habitId, item.position, now],
   });
   counts.yearGoals++;
 
-  // Monthly children (May-Dec only) via largest-remainder split.
-  const monthSplits = autoSplit(yearTarget, 12);
   for (let m = CURRENT_MONTH_IDX; m < 12; m++) {
     const monthKey = `${YEAR}-${String(m + 1).padStart(2, "0")}`;
     await client.execute({
       sql: `INSERT INTO goals
             (id, period, period_key, parent_id, title, emoji, color, type, target_value, unit, habit_id, pomo_category_id, pomo_metric, status, position, created_at)
-            VALUES (?, 'month', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+            VALUES (?, 'month', ?, ?, ?, ?, ?, 'habit', ?, NULL, ?, NULL, NULL, 'active', ?, ?)`,
       args: [
-        nanoid(), monthKey, yearGoalId, item.name, item.emoji, item.color, goalType,
-        monthSplits[m], unit, habitId, pomoCategoryId, item.metric ?? null, pos, now,
+        nanoid(), monthKey, yearGoalId, item.name, item.emoji, item.color,
+        monthSplits[m], habitId, item.position, now,
       ],
     });
     counts.monthGoals++;
   }
 
-  // Weekly goal for current W21
   await client.execute({
     sql: `INSERT INTO goals
           (id, period, period_key, parent_id, title, emoji, color, type, target_value, unit, habit_id, pomo_category_id, pomo_metric, status, position, created_at)
-          VALUES (?, 'week', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+          VALUES (?, 'week', ?, NULL, ?, ?, ?, 'habit', ?, NULL, ?, NULL, NULL, 'active', ?, ?)`,
     args: [
-      nanoid(), CURRENT_WEEK_KEY, item.name, item.emoji, item.color, goalType,
-      item.weekly, unit, habitId, pomoCategoryId, item.metric ?? null, pos, now,
+      nanoid(), CURRENT_WEEK_KEY, item.name, item.emoji, item.color,
+      item.weeklyDays, habitId, item.position, now,
     ],
   });
   counts.weekGoals++;
@@ -222,4 +235,6 @@ console.log(`  habits:                    ${counts.habits}`);
 console.log(`  yearly goals:              ${counts.yearGoals}`);
 console.log(`  monthly goals:             ${counts.monthGoals}  (May-Dec for each)`);
 console.log(`  weekly goals:              ${counts.weekGoals}  (W21 only)`);
-console.log(`  TOTAL INSERTED:            ${counts.categories + counts.habits + counts.yearGoals + counts.monthGoals + counts.weekGoals}`);
+console.log(
+  `  TOTAL INSERTED:            ${counts.categories + counts.habits + counts.yearGoals + counts.monthGoals + counts.weekGoals}`,
+);

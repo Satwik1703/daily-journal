@@ -122,7 +122,15 @@ export default async function InsightsPage({
           (h) => formatLocalYMD(h.createdAt) <= habitsSnapshot.anchor,
         )}
         windowDates={habitsSnapshot.windowDates}
-        windowLogs={habitsSnapshot.windowLogs}
+        windowLogs={Object.fromEntries(
+          Array.from(habitsSnapshot.windowLogs, ([hid, set]) => [hid, Array.from(set)]),
+        )}
+        windowValuesByHabit={Object.fromEntries(
+          Array.from(habitsSnapshot.windowValuesByHabit, ([hid, m]) => [hid, Object.fromEntries(m)]),
+        )}
+        windowPomoByHabit={Object.fromEntries(
+          Array.from(habitsSnapshot.windowPomoByHabit, ([hid, m]) => [hid, Object.fromEntries(m)]),
+        )}
         today={habitsSnapshot.today}
       />
 

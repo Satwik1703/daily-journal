@@ -3,7 +3,9 @@ import {
   goals,
   goalProgress,
   goalChecklist,
+  habits,
   habitLogs,
+  habitValueLogs,
   pomodoroSessions,
 } from "@/db/schema";
 import { and, asc, between, eq, inArray, isNull, sum, count } from "drizzle-orm";
@@ -67,16 +69,76 @@ async function sumProgressForGoals(goalIds: string[]): Promise<Map<string, numbe
   return new Map(rows.map((r) => [r.goalId, r.total ?? 0]));
 }
 
+/**
+ * Days-in-range that the habit was "done", per its tracking kind.
+ *  - binary  → count habit_logs rows (already one per day, PK)
+ *  - number  → count distinct dates where SUM(value) >= dailyTarget
+ *  - pomodoro → count distinct dates where COUNT(sessions for cat) >= dailyTarget
+ *
+ * Habit row is loaded once so we can dispatch on `trackingKind`. Missing or
+ * malformed daily_target collapses to "any positive value counts" so a
+ * goal linked to a misconfigured number/pomo habit still has a working
+ * derivation rather than silently sitting at 0.
+ */
 async function habitCountInRange(
   habitId: string,
   start: DateString,
   end: DateString,
 ): Promise<number> {
+  const habitRow = await db
+    .select({
+      trackingKind: habits.trackingKind,
+      dailyTarget: habits.dailyTarget,
+      pomoCategoryId: habits.pomoCategoryId,
+    })
+    .from(habits)
+    .where(eq(habits.id, habitId))
+    .limit(1);
+  const h = habitRow[0];
+  if (!h) return 0;
+
+  if (h.trackingKind === "binary") {
+    const rows = await db
+      .select({ n: count(habitLogs.date) })
+      .from(habitLogs)
+      .where(and(eq(habitLogs.habitId, habitId), between(habitLogs.date, start, end)));
+    return rows[0]?.n ?? 0;
+  }
+
+  if (h.trackingKind === "number") {
+    const rows = await db
+      .select({ date: habitValueLogs.date, value: habitValueLogs.value })
+      .from(habitValueLogs)
+      .where(and(eq(habitValueLogs.habitId, habitId), between(habitValueLogs.date, start, end)));
+    const perDay = new Map<string, number>();
+    for (const r of rows) perDay.set(r.date, (perDay.get(r.date) ?? 0) + r.value);
+    const target = h.dailyTarget && h.dailyTarget > 0 ? h.dailyTarget : null;
+    let qualifying = 0;
+    for (const v of perDay.values()) {
+      if (target == null ? v > 0 : v >= target) qualifying++;
+    }
+    return qualifying;
+  }
+
+  // pomodoro
+  if (!h.pomoCategoryId) return 0;
   const rows = await db
-    .select({ n: count(habitLogs.date) })
-    .from(habitLogs)
-    .where(and(eq(habitLogs.habitId, habitId), between(habitLogs.date, start, end)));
-  return rows[0]?.n ?? 0;
+    .select({ date: pomodoroSessions.date })
+    .from(pomodoroSessions)
+    .where(
+      and(
+        eq(pomodoroSessions.categoryId, h.pomoCategoryId),
+        between(pomodoroSessions.date, start, end),
+      ),
+    );
+  const perDay = new Map<string, number>();
+  for (const r of rows) perDay.set(r.date, (perDay.get(r.date) ?? 0) + 1);
+  const target = h.dailyTarget && h.dailyTarget > 0 ? h.dailyTarget : null;
+  let qualifying = 0;
+  for (const v of perDay.values()) {
+    if (target == null ? v > 0 : v >= target) qualifying++;
+  }
+  return qualifying;
 }
 
 async function pomodoroValueInRange(

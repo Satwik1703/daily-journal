@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getHabitsSnapshot } from "@/db/queries/habits";
+import { getActiveCategories } from "@/db/queries/pomodoro-categories";
 import { formatHumanDate, formatLocalYMD, isValidDateString, todayLocal } from "@/lib/dates";
 import { TodayToggles } from "../_components/today-toggles";
 import { HabitGrid } from "../_components/habit-grid";
@@ -18,7 +19,10 @@ export default async function HabitsDatePage({
   if (date === "today") redirect(`/habits/${todayLocal()}`);
   if (!isValidDateString(date)) notFound();
 
-  const snapshot = await getHabitsSnapshot({ anchor: date, windowDays: 15 });
+  const [snapshot, pomoCategories] = await Promise.all([
+    getHabitsSnapshot({ anchor: date, windowDays: 15 }),
+    getActiveCategories(),
+  ]);
 
   // Hide habits from dates before they were created — they didn't exist yet.
   const activeForAnchor = snapshot.active.filter(
@@ -27,6 +31,33 @@ export default async function HabitsDatePage({
 
   const isToday = date === snapshot.today;
   const hasHabits = activeForAnchor.length > 0 || snapshot.archived.length > 0;
+
+  // Flatten the two Map<Map> shapes into plain Records keyed by habit id —
+  // RSC can't serialize Maps across the server/client boundary (rule #8).
+  const valueAtAnchor: Record<string, number> = {};
+  const pomoCountAtAnchor: Record<string, number> = {};
+  for (const h of activeForAnchor) {
+    if (h.trackingKind === "number") {
+      valueAtAnchor[h.id] = snapshot.windowValuesByHabit.get(h.id)?.get(date) ?? 0;
+    } else if (h.trackingKind === "pomodoro") {
+      pomoCountAtAnchor[h.id] = snapshot.windowPomoByHabit.get(h.id)?.get(date) ?? 0;
+    }
+  }
+
+  // Map<Map> → Record<Record> for habit-grid client subtree.
+  const windowValuesRecord: Record<string, Record<string, number>> = {};
+  for (const [hid, dayMap] of snapshot.windowValuesByHabit) {
+    windowValuesRecord[hid] = Object.fromEntries(dayMap);
+  }
+  const windowPomoRecord: Record<string, Record<string, number>> = {};
+  for (const [hid, dayMap] of snapshot.windowPomoByHabit) {
+    windowPomoRecord[hid] = Object.fromEntries(dayMap);
+  }
+  // Pre-flatten binary windowLogs too — same RSC reason.
+  const windowLogsRecord: Record<string, string[]> = {};
+  for (const [hid, dateSet] of snapshot.windowLogs) {
+    windowLogsRecord[hid] = Array.from(dateSet);
+  }
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
@@ -40,7 +71,7 @@ export default async function HabitsDatePage({
             {!isToday ? " · backfilling" : null}
           </p>
         </div>
-        <AddHabitButton disabled={!isToday} />
+        <AddHabitButton disabled={!isToday} categories={pomoCategories} />
       </div>
 
       {!hasHabits ? (
@@ -52,15 +83,23 @@ export default async function HabitsDatePage({
             isToday={isToday}
             habits={activeForAnchor}
             doneIds={Array.from(snapshot.doneOnAnchorIds)}
+            valueAtAnchor={valueAtAnchor}
+            pomoCountAtAnchor={pomoCountAtAnchor}
           />
           <HabitGrid
             habits={activeForAnchor}
             windowDates={snapshot.windowDates}
-            windowLogs={snapshot.windowLogs}
+            windowLogs={windowLogsRecord}
+            windowValuesByHabit={windowValuesRecord}
+            windowPomoByHabit={windowPomoRecord}
             today={snapshot.today}
             anchor={date}
           />
-          <HabitList active={activeForAnchor} archived={snapshot.archived} />
+          <HabitList
+            active={activeForAnchor}
+            archived={snapshot.archived}
+            categories={pomoCategories}
+          />
         </>
       )}
     </div>

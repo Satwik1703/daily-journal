@@ -5,9 +5,13 @@ A personal daily-life app: structured journal, habit tracker, gym tracker with a
 ## What's inside
 
 - **Journal** (`/journal/[date]`) — gratitude, identity reminders, daily metrics (energy/mood/sleep), customizable daily questions, goals/non-negotiables/secondary task lists, tomorrow's plan. Autosaves on idle. Date stepper opens a calendar popover with status-colored cells (Crazy / Great / Good / Avg / Bad). Tasks have a **move action** — quick "Move to today/tomorrow" + full date picker — and the original date keeps a strikethrough trace stub so the history still tells the truth.
-- **Habits** (`/habits/[date]`) — tap-to-log today's habits, rolling 15-day completion grid, manage list (add/edit/archive). Past-date logging via dated URL; new-habit button locks off-today. Calendar popover mirrors the journal one.
+- **Habits** (`/habits/[date]`) — every tracked item lives here, regardless of how it's measured. Three tracking kinds:
+  - **Binary** (Journal, Gym, Pray, etc.) — single tap to mark done.
+  - **Number** (Walk 5k, Read 5 pages) — inline "Log" button opens a mini dialog for the day's amount; "done" once the day's sum hits `daily_target`. Multiple deltas per day are allowed and summed on read.
+  - **Pomodoro** (Work, Study, Create) — read-only count of today's sessions for the linked category; tap row to jump to `/pomodoro/{date}`. "Done" once session count hits the daily target.
+  Rolling 15-day completion grid, manage list (add/edit/archive). Past-date logging via dated URL; new-habit button locks off-today. Calendar popover mirrors the journal one.
 - **Pomodoro** (`/pomodoro/[date]`) — animated focus timer (50 min = 1 pomo, 30 min = ½). Live time-span readout (e.g. `5:00 PM → 5:50 PM`), categorized sessions, post-session description prompt, manual backfill, completion chime (Web Audio synth, 4 selectable profiles), refresh-safe wall-clock persistence. Day stats card with yesterday comparison, per-category bars, 24-bar hourly strip, session list.
-- **Goals** (`/goals/[period]/[anchor]`) — weekly / monthly / yearly intentions with progress tracking. Four goal types: **number** (log deltas), **habit-linked** (auto-pulls from `habit_logs`), **pomodoro-linked** (auto-pulls from sessions, optional category filter, minutes/pomos/sessions metric), and **milestone + checklist**. SVG donut summary, period stepper, cascade rollups (parent → children), history strip (5 prior periods), 52-week year heatmap. **Forward cascade** auto-splits a yearly target across months (largest-remainder integer split). **Reverse cascade** lets you enter a weekly target once and propagate it forward across every future week + matching monthly/yearly parents through "end of {month}" or "end of year". Auto-finalizes closed periods to achieved/missed; bottom-sheet reflection captures rating + note + optional journal link.
+- **Goals** (`/goals/[period]/[anchor]`) — weekly / monthly / yearly intentions with progress tracking. Four goal types: **number** (log deltas — for things with no daily-habit equivalent like "Save ₹20k by year-end"), **habit-linked** (auto-pulls from each habit's tracking kind — counts days where the habit hit its `daily_target`), **pomodoro-linked** (auto-pulls from sessions, optional category filter, minutes/pomos/sessions metric), and **milestone + checklist**. SVG donut summary, period stepper, cascade rollups (parent → children), history strip (5 prior periods), 52-week year heatmap. **Forward cascade** auto-splits a yearly target across months (largest-remainder integer split). **Reverse cascade** lets you enter a weekly target once and propagate it forward across every future week + matching monthly/yearly parents through "end of {month}" or "end of year". Auto-finalizes closed periods to achieved/missed; bottom-sheet reflection captures rating + note + optional journal link.
 - **Insights** (`/insights`) — mood/energy/sleep trend chart, habit completion %, habit timeline grid, streaks, gratitude word cloud, **Focus section** (focus minutes/day bar chart, configurable category trend chart, top categories, best time-of-day histogram, monthly heatmap). Range toggle (7 / 15 / 30 / 90 days) drives every card. Lives under `/more`.
 - **More** (`/more`) — hub linking to Insights + Gym + Settings.
 - **Gym** (`/gym`) — log workouts at a high level (muscle group + intensity), see a body heatmap that shades each muscle redder as you train it. Front + back views.
@@ -44,7 +48,7 @@ Open `http://localhost:3000` — you'll be redirected to today's journal entry. 
 3. In Vercel project settings, add env vars:
    - `TURSO_DATABASE_URL` = `libsql://habit-log-…turso.io`
    - `TURSO_AUTH_TOKEN` = `…`
-4. Run migrations against prod (this applies all generated SQL files, including `0001_low_leo.sql` for identity reminders, `0002_chubby_nomad.sql` for pomodoro, and `0003_dizzy_captain_marvel.sql` for goals):
+4. Run migrations against prod (this applies all generated SQL files, including `0001_low_leo.sql` for identity reminders, `0002_chubby_nomad.sql` for pomodoro, `0003_dizzy_captain_marvel.sql` for goals, and `0004_skinny_cargill.sql` for habit tracking-kind + value logs):
    ```bash
    TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run db:migrate
    ```
@@ -61,7 +65,7 @@ Commit the generated `drizzle/migrations/*.sql` files; they are the source of tr
 
 ## PWA cache
 
-The service worker at `public/sw.js` ships a `VERSION` constant — **bump it on every deploy**, otherwise installed phones serve a stale shell. The shell list also includes every top-level route, so update it when adding a new tab. Current version: `habit-log-v6`. On `localhost` the SW does NOT register (it actively unregisters + clears caches) so Turbopack-rebuilt chunks aren't served stale during dev.
+The service worker at `public/sw.js` ships a `VERSION` constant — **bump it on every deploy**, otherwise installed phones serve a stale shell. The shell list also includes every top-level route, so update it when adding a new tab. Current version: `habit-log-v7`. On `localhost` the SW does NOT register (it actively unregisters + clears caches) so Turbopack-rebuilt chunks aren't served stale during dev.
 
 ## Project conventions
 
@@ -82,7 +86,7 @@ node scripts/seed-habits-goals.mjs local                                     # w
 TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… node scripts/seed-habits-goals.mjs prod  # destructive mirror onto Turso
 ```
 
-`prod` mode wipes the 5 goal/habit tables (`goal_progress`, `goal_checklist`, `goals`, `habit_logs`, `habits`), preserves journal + pomodoro data, renames any pre-existing "Creative" pomodoro category to "Create", and reuses prod's existing pomodoro_categories ids rather than inserting fresh ones.
+`prod` mode wipes 6 goal/habit tables (`goal_progress`, `goal_checklist`, `goals`, `habit_value_logs`, `habit_logs`, `habits`), preserves journal + pomodoro data, renames any pre-existing "Creative" pomodoro category to "Create", and reuses prod's existing pomodoro_categories ids rather than inserting fresh ones.
 
 ## Roadmap (deferred)
 

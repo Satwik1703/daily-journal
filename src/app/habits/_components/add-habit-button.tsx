@@ -3,10 +3,16 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { HabitFormDialog } from "./habit-form-dialog";
+import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
 import { cn } from "@/lib/utils";
 
-export function AddHabitButton({ disabled = false }: { disabled?: boolean }) {
+export function AddHabitButton({
+  disabled = false,
+  categories,
+}: {
+  disabled?: boolean;
+  categories: CategoryOption[];
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -21,7 +27,7 @@ export function AddHabitButton({ disabled = false }: { disabled?: boolean }) {
         <Plus />
         New
       </Button>
-      <HabitFormDialog open={open} onOpenChange={setOpen} habit={null} />
+      <HabitFormDialog open={open} onOpenChange={setOpen} habit={null} categories={categories} />
     </>
   );
 }
