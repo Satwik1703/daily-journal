@@ -18,3 +18,15 @@ export const TASK_KIND_HINTS: Record<TaskKind, string> = {
   nonNegotiable: "must-do, no excuses",
   secondary: "nice-to-have if time allows",
 };
+
+// Sentinel marker used inside trace stub rows left behind when a task is
+// moved. The row's text is stored as
+//   "{originalText} → Moved to {Month DD}"
+// Detection is a substring check on the marker — no schema column needed.
+// The marker is unique enough that user-typed text won't accidentally
+// match (the leading space + arrow + "Moved to " combination).
+export const TASK_TRACE_MARKER = " → Moved to ";
+
+export function isTraceTask(text: string): boolean {
+  return text.includes(TASK_TRACE_MARKER);
+}

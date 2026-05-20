@@ -2,12 +2,16 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import TextareaAutosize from "react-textarea-autosize";
-import { Plus, Trash2, Check } from "lucide-react";
+import { Plus, Trash2, Check, CalendarArrowUp } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { addTask, deleteTask, toggleTask, updateTaskText } from "@/app/actions/journal-tasks";
-import { TASK_KIND_HINTS, TASK_KIND_LABELS, TASK_KINDS, type TaskKind } from "@/lib/task-meta";
+import { toast } from "sonner";
+import { addTask, deleteTask, moveJournalTask, toggleTask, updateTaskText } from "@/app/actions/journal-tasks";
+import { TASK_KIND_HINTS, TASK_KIND_LABELS, TASK_KINDS, isTraceTask, type TaskKind } from "@/lib/task-meta";
+import { addDays, shiftMonth, todayLocal, type DateString } from "@/lib/dates";
 import type { JournalTask } from "@/db/queries/journal-tasks";
 
 export function TasksBlock({ date, tasks }: { date: string; tasks: JournalTask[] }) {
@@ -67,6 +71,29 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
 }
 
 function TaskRow({ task }: { task: JournalTask }) {
+  // Trace stub rows (left behind by moveJournalTask): render simpler,
+  // read-only, with no interactive controls.
+  if (isTraceTask(task.text)) {
+    return <TraceRow text={task.text} />;
+  }
+
+  return <ActiveTaskRow task={task} />;
+}
+
+function TraceRow({ text }: { text: string }) {
+  // text format: "→ Moved to YYYY-MM-DD: excerpt"
+  // We re-emit it as muted italics + strikethrough.
+  return (
+    <div className="flex items-start gap-2 rounded-md px-1 py-1 opacity-60">
+      <span className="mt-1.5 size-5 shrink-0" aria-hidden />
+      <span className="flex-1 px-2 py-1 text-sm italic leading-relaxed text-muted-foreground line-through">
+        {text}
+      </span>
+    </div>
+  );
+}
+
+function ActiveTaskRow({ task }: { task: JournalTask }) {
   const [text, setText] = useState(task.text);
   const [done, setDone] = useState(task.done);
   const [, startTransition] = useTransition();
@@ -129,6 +156,7 @@ function TaskRow({ task }: { task: JournalTask }) {
           done && "text-muted-foreground line-through",
         )}
       />
+      {!done ? <MoveTaskButton taskId={task.id} taskDate={task.date} /> : null}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -143,6 +171,95 @@ function TaskRow({ task }: { task: JournalTask }) {
         <Trash2 />
       </Button>
     </div>
+  );
+}
+
+/**
+ * Move-task affordance. One trigger (calendar-arrow icon), one popover.
+ * Popup has two modes: "menu" (quick smart button + Pick date…) and
+ * "picker" (embedded month-grid calendar). Stays inside this component to
+ * avoid nesting two base-ui Popovers.
+ */
+function MoveTaskButton({ taskId, taskDate }: { taskId: string; taskDate: string }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"menu" | "picker">("menu");
+  const [month, setMonth] = useState<DateString>(taskDate);
+  const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!open) setMode("menu");
+  }, [open]);
+
+  const today = todayLocal();
+  const quickTarget = taskDate < today ? today : addDays(today, 1);
+  const quickLabel = taskDate < today ? "Move to today" : "Move to tomorrow";
+
+  function move(newDate: string) {
+    if (newDate === taskDate) {
+      toast.error("Same date");
+      return;
+    }
+    setOpen(false);
+    startTransition(async () => {
+      try {
+        await moveJournalTask({ id: taskId, newDate });
+        toast.success(`Moved to ${newDate}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to move task");
+      }
+    });
+  }
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Move task"
+            className="opacity-50 hover:opacity-100"
+          />
+        }
+      >
+        <CalendarArrowUp />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={6} className="z-50 outline-none">
+          <Popover.Popup className="rounded-md border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5 outline-none">
+            {mode === "menu" ? (
+              <div className="flex w-44 flex-col">
+                <button
+                  type="button"
+                  disabled={pending || quickTarget === taskDate}
+                  onClick={() => move(quickTarget)}
+                  className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                >
+                  {quickLabel}
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => setMode("picker")}
+                  className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                >
+                  Pick date…
+                </button>
+              </div>
+            ) : (
+              <Calendar
+                month={month}
+                selected={taskDate}
+                onSelect={(d) => move(d)}
+                disableFuture={false}
+                onPrevMonth={() => setMonth(shiftMonth(month, -1))}
+                onNextMonth={() => setMonth(shiftMonth(month, 1))}
+              />
+            )}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

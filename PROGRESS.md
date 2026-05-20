@@ -607,6 +607,112 @@ src/app/goals/
 
 ---
 
+## ✅ Phase 5 — Reverse cascade + journal task move
+
+Plan: `C:\Users\Admin\.claude\plans\now-let-s-build-a-partitioned-floyd.md`. Shipped end-to-end after a brainstorm session that also locked in the user's canonical 14-item habit + goal stack.
+
+### Context
+
+Two user-driven friction points surfaced after the Goals feature shipped:
+1. Creating a weekly goal once didn't propagate to future weeks; manually re-entering "Workout 5×" every Sunday for 32 future weeks was un-shippable. The forward cascade (year → month → week) hides the natural weekly entry point — users think "5×/week", not "260/year".
+2. Journal tasks left undone on past dates had no way back to today, and tasks the user wanted to defer to tomorrow had no rollover.
+
+### Shipped — reverse cascade
+
+- `src/lib/dates.ts` — new `enumerateWeeksThrough(currentKey, endKind, endRef)` returns ISO week keys from `currentKey` through end-of-month or end-of-year (inclusive on both ends, Thursday-anchored). Safety bound at 110 weeks. Reuses `shiftPeriodKey` so the Sun-start display vs. ISO-week-membership trap from Phase 4 Part 2 doesn't recur here.
+- `src/app/actions/goals.ts` — `createGoal` accepts a new optional `repeat: { through, monthKey? }` arg. When set on a `period: "week"` goal, the standard single-row insert is skipped and the new internal `createReverseCascade()` helper takes over:
+  - Enumerates weeks via `enumerateWeeksThrough`
+  - Groups weeks by the **Thursday's month** (matches the forward-cascade convention from `createCascadeChildren`)
+  - Inserts a yearly parent (only if `through === "endOfYear"`)
+  - Inserts a monthly parent per month spanned (target = weekly × weeks-in-month)
+  - Inserts weekly clones linked to their month's parent
+  - Validates `monthKey >= todayMonth`, rejects milestone goals, rejects same-week
+- `src/app/goals/[period]/[anchor]/_components/goal-form-dialog.tsx` — new "Repeat through" section appears only on `period === "week"` && `type !== "milestone"`. Three radio options: this week only / end of month {dropdown of future months only} / end of year. Live preview shows estimated row counts (weeks × months × yearly).
+
+### Shipped — journal task move
+
+- `src/lib/task-meta.ts` — replaced prefix-based `TASK_TRACE_PREFIX` with substring marker `TASK_TRACE_MARKER = " → Moved to "` so the trace row text can read naturally with the habit name first: `"Testing → Moved to May 21"`. `isTraceTask()` now does `text.includes(MARKER)`.
+- `src/app/actions/journal-tasks.ts` — new `moveJournalTask({ id, newDate })` action:
+  - Validates id + `isValidDateString(newDate)` + rejects same-date moves and moving an existing trace stub
+  - `ensureEntry(newDate)` for FK safety, computes new position via `nextTaskPosition`
+  - Updates the row's `date / position / done=false` (move = fresh start on target date)
+  - Inserts a trace stub on the original date: `text = "{excerpted} → Moved to {formatShortDate(newDate)}"`, `done = true`. Excerpt cap at 60 chars + ellipsis.
+  - Revalidates both `/journal/{oldDate}` and `/journal/{newDate}`
+- `src/app/journal/[date]/_components/tasks-block.tsx`:
+  - Split `TaskRow` into `TraceRow` (read-only; italic + line-through + muted, no controls) and `ActiveTaskRow` (existing logic + new move button).
+  - New `MoveTaskButton` component owns a single `@base-ui/react` Popover with two modes: "menu" (smart "Move to today/tomorrow" button + "Pick date…") and "picker" (embedded `Calendar` primitive with month nav state). Avoids nesting two base-ui popovers.
+  - Move icon hidden when `done === true` (forced-move-after-flush is intentionally not supported).
+
+### Other changes folded in
+
+- **`src/lib/pomodoro-meta.ts`** — `DEFAULT_CATEGORIES` rename "Creative" → "Create" so the user's "Create" pomodoro-linked goal title matches the seeded category name. Auto-seed on first `/pomodoro` read now gives "Create".
+- **`public/sw.js`** — VERSION bumped `habit-log-v5 → habit-log-v6`. No SHELL change (no new top-level routes).
+- **`scripts/seed-habits-goals.mjs`** — the canonical habit + goal stack seeder used during the brainstorm session. Two modes:
+  - `local`: fresh-DB seed with 6 pomodoro categories + 9 habits + 14 yearly + 8×14 monthly + 14 weekly goals (155 rows for May 2026).
+  - `prod`: destructive mirror — wipes `goal_progress`, `goal_checklist`, `goals`, `habit_logs`, `habits`, then renames any existing "Creative" → "Create" in `pomodoro_categories` and reuses prod's existing category ids rather than inserting new ones. Preserves journal + pomodoro sessions on prod.
+- **`scripts/check-seed.mjs`** — quick read-back of habits + categories + W21 / May / 2026 goals after seeding.
+- **README.md** — Goals tab section added (with reverse cascade + task move described), default category list updated to "Create", helpful-scripts block expanded with `seed-habits-goals.mjs` (local + prod usage), SW version bumped reference.
+
+### The canonical 14-item stack (seeded May 2026)
+
+Order matches what's now visible on `/habits` + `/goals/week/2026-W21` (`position` 0..13):
+
+| Pos | Item | Kind | Weekly | Monthly (May) | Yearly |
+|---:|------|------|---:|---:|---:|
+| 0 | ☀️ Wake up at 8 | habit | 3 | 13 | 156 |
+| 1 | ✍️ Journal | habit | 5 | 22 | 260 |
+| 2 | 🏋️ Gym | habit | 5 | 22 | 260 |
+| 3 | 🙏 Pray | habit | 3 | 13 | 156 |
+| 4 | 🕉️ Mantra | habit | 5 | 22 | 260 |
+| 5 | 💼 Work | pomo (Work, sessions) | 20 | 87 | 1040 |
+| 6 | 🧘 Meditate 5 min | habit | 3 | 13 | 156 |
+| 7 | 📖 Study | pomo (Study, sessions) | 5 | 22 | 260 |
+| 8 | 👟 Walk (5k) | number (steps) | 25000 | 108333 | 1300000 |
+| 9 | 📚 Read (5 pages) | number (pages) | 25 | 108 | 1300 |
+| 10 | 🥗 No junk | habit | 5 | 22 | 260 |
+| 11 | 🎨 Create | pomo (Create, sessions) | 2 | 9 | 104 |
+| 12 | 🪥 Brush + Skincare | habit | 5 | 22 | 260 |
+| 13 | 😴 Sleep before 12 | habit | 3 | 13 | 156 |
+
+Yearly goals all have May–Dec 2026 monthly cascade children (largest-remainder split, skips past months Jan–Apr). Weekly goals exist for `2026-W21` only — future weeks will be created either manually or via the new reverse cascade feature on next session.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 13 expected `set-state-in-effect` warnings (intentional state-sync pattern, no new categories).
+- `npm run build` clean — same 18 routes.
+- User manually verified end-to-end on localhost: reverse cascade with end-of-year, end-of-month August; task move from past date → today + trace; task move from today → tomorrow + trace; pick-date calendar; new trace format `"{habit} → Moved to May 21"`.
+
+### Deploy steps
+
+1. `git push origin main` (commit covers code + seed script + docs).
+2. No schema migration in Phase 5 itself (Goals tables already on prod from 0003).
+3. Mirror the seeded habit + goal stack to prod:
+   ```
+   $env:Path += ";C:\Program Files\nodejs;$env:APPDATA\npm;C:\Program Files\Git\cmd"
+   Get-Content .env.production.local | ForEach-Object {
+     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)\s*$') {
+       Set-Item -Path "Env:\$($matches[1])" -Value $matches[2].Trim('"')
+     }
+   }
+   node scripts/seed-habits-goals.mjs prod
+   ```
+4. `vercel --prod --yes` from `Habit_Log/`.
+5. PWA: installed phones pick up `habit-log-v6` shell on next SW activation.
+
+### Things deferred to Phase 5.1+
+
+- "Move all incomplete" bulk action (Card-level button).
+- Undo for task moves.
+- Reverse-cascade edit / regenerate (delete + redo for now).
+- De-dup detection on reverse cascade (re-running for same title creates parallel hierarchies).
+- Trace row tap-to-navigate-to-moved-target (currently visual only).
+- Auto-create weekly clones each Sunday for the rest of the seeded year (currently W21 is the only week with goals — Phase 5.1 idea).
+
+**Resume here for next session:** Phase 5 deployed. Awaiting next direction.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

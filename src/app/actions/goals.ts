@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import {
   addDays,
+  enumerateWeeksThrough,
   isValidDateString,
   isoWeekKey,
   monthKeyOf,
@@ -137,6 +138,16 @@ export async function createGoal(input: {
   pomoMetric?: PomoMetric | null;
   parentId?: string | null;
   autoSplitChildren?: boolean;
+  /**
+   * Reverse cascade (week → month → year). When set on a week-period goal,
+   * the form's standard single-row insert is skipped and we delegate to
+   * createReverseCascade() which inserts year + month parents + weekly
+   * clones for every week in the horizon.
+   */
+  repeat?: {
+    through: "endOfMonth" | "endOfYear";
+    monthKey?: string; // required when through === "endOfMonth"
+  };
 }): Promise<{ id: string }> {
   const period = assertPeriod(input.period);
   const periodKey = assertPeriodKey(input.periodKey, period);
@@ -155,6 +166,48 @@ export async function createGoal(input: {
   }
   if (type === "pomodoro" && !input.pomoMetric) {
     throw new Error("Pomodoro goals need a metric");
+  }
+
+  // ---------- Reverse cascade branch ----------
+  if (input.repeat) {
+    if (period !== "week") {
+      throw new Error("`repeat` only valid on week-period goals");
+    }
+    if (type === "milestone") {
+      throw new Error("Milestone goals can't repeat (no shared target across periods)");
+    }
+    if (targetValue == null || targetValue <= 0) {
+      throw new Error("Repeating goals need a positive target");
+    }
+    let endRef: string;
+    if (input.repeat.through === "endOfMonth") {
+      if (!input.repeat.monthKey || !/^\d{4}-(0[1-9]|1[0-2])$/.test(input.repeat.monthKey)) {
+        throw new Error("repeat.monthKey must be YYYY-MM for endOfMonth");
+      }
+      const todayMonth = periodKeyFor(todayLocal(), "month");
+      if (input.repeat.monthKey < todayMonth) {
+        throw new Error("repeat.monthKey must be the current month or later");
+      }
+      endRef = input.repeat.monthKey;
+    } else {
+      endRef = periodKey.slice(0, 4); // year of the current week key
+    }
+    const { id: yearGoalId } = await createReverseCascade({
+      currentWeekKey: periodKey,
+      endKind: input.repeat.through,
+      endRef,
+      title,
+      emoji,
+      color,
+      type,
+      weeklyTarget: targetValue,
+      unit,
+      habitId: input.habitId ?? null,
+      pomoCategoryId: input.pomoCategoryId ?? null,
+      pomoMetric: input.pomoMetric ?? null,
+    });
+    revalidateGoals();
+    return { id: yearGoalId };
   }
 
   const id = nanoid(12);
@@ -257,6 +310,123 @@ async function createCascadeChildren(opts: {
       position,
     });
   }
+}
+
+/**
+ * Reverse cascade: start at a weekly target and create
+ *   - one yearly parent (only if endKind === "endOfYear")
+ *   - N monthly parents (one per month spanned by the weeks)
+ *   - one weekly clone per week in the horizon
+ * Linked by parentId so the existing CascadeChildren rollup works as-is.
+ *
+ * Returns the topmost parent id (yearGoalId if any, else the first monthly
+ * parent id) so the caller can revalidate / route off it.
+ */
+async function createReverseCascade(opts: {
+  currentWeekKey: string;
+  endKind: "endOfMonth" | "endOfYear";
+  endRef: string;
+  title: string;
+  emoji: string | null;
+  color: string;
+  type: GoalType;
+  weeklyTarget: number;
+  unit: string | null;
+  habitId: string | null;
+  pomoCategoryId: string | null;
+  pomoMetric: PomoMetric | null;
+}): Promise<{ id: string; weekCount: number; monthCount: number; yearCount: number }> {
+  const weekKeys = enumerateWeeksThrough(opts.currentWeekKey, opts.endKind, opts.endRef);
+  if (weekKeys.length === 0) throw new Error("No weeks in horizon");
+
+  // Group weeks by their Thursday's month (ISO convention — matches
+  // createCascadeChildren's enumeration so the same week never lands in two
+  // different month buckets).
+  const monthsToWeeks = new Map<string, string[]>();
+  for (const wk of weekKeys) {
+    const wkRange = periodRangeFor(wk, "week");
+    const thursday = addDays(wkRange.start, 4);
+    const monthKey = thursday.slice(0, 7);
+    let arr = monthsToWeeks.get(monthKey);
+    if (!arr) {
+      arr = [];
+      monthsToWeeks.set(monthKey, arr);
+    }
+    arr.push(wk);
+  }
+
+  const shared = {
+    title: opts.title,
+    emoji: opts.emoji,
+    color: opts.color,
+    type: opts.type,
+    unit: opts.unit,
+    habitId: opts.habitId,
+    pomoCategoryId: opts.pomoCategoryId,
+    pomoMetric: opts.pomoMetric,
+    status: "active" as const,
+  };
+
+  let yearGoalId: string | null = null;
+  let yearCount = 0;
+  if (opts.endKind === "endOfYear") {
+    const yearKey = opts.endRef;
+    const yearTarget = opts.weeklyTarget * weekKeys.length;
+    yearGoalId = nanoid(12);
+    const position = await nextPositionFor("year", yearKey);
+    await db.insert(goals).values({
+      ...shared,
+      id: yearGoalId,
+      period: "year",
+      periodKey: yearKey,
+      parentId: null,
+      targetValue: yearTarget,
+      position,
+    });
+    yearCount = 1;
+  }
+
+  // Monthly parents — one per month, target = sum of weeks in that month
+  const monthlyParentIdByMonth = new Map<string, string>();
+  for (const [monthKey, weeksInMonth] of monthsToWeeks) {
+    const monthGoalId = nanoid(12);
+    const monthTarget = opts.weeklyTarget * weeksInMonth.length;
+    const position = await nextPositionFor("month", monthKey);
+    await db.insert(goals).values({
+      ...shared,
+      id: monthGoalId,
+      period: "month",
+      periodKey: monthKey,
+      parentId: yearGoalId,
+      targetValue: monthTarget,
+      position,
+    });
+    monthlyParentIdByMonth.set(monthKey, monthGoalId);
+  }
+
+  // Weekly clones — link to their month
+  for (const wk of weekKeys) {
+    const wkRange = periodRangeFor(wk, "week");
+    const monthKey = addDays(wkRange.start, 4).slice(0, 7);
+    const parentId = monthlyParentIdByMonth.get(monthKey)!;
+    const position = await nextPositionFor("week", wk);
+    await db.insert(goals).values({
+      ...shared,
+      id: nanoid(12),
+      period: "week",
+      periodKey: wk,
+      parentId,
+      targetValue: opts.weeklyTarget,
+      position,
+    });
+  }
+
+  return {
+    id: yearGoalId ?? Array.from(monthlyParentIdByMonth.values())[0],
+    weekCount: weekKeys.length,
+    monthCount: monthsToWeeks.size,
+    yearCount,
+  };
 }
 
 function enumerateChildKeys(

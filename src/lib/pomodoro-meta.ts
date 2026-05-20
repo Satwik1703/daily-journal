@@ -69,6 +69,6 @@ export const DEFAULT_CATEGORIES: ReadonlyArray<{
   { name: "Study", emoji: "📚", color: "#a855f7" },
   { name: "Read", emoji: "📖", color: "#10b981" },
   { name: "Exercise", emoji: "🏃", color: "#f43f5e" },
-  { name: "Creative", emoji: "🎨", color: "#f59e0b" },
+  { name: "Create", emoji: "🎨", color: "#f59e0b" },
   { name: "Other", emoji: "✨", color: "#64748b" },
 ] as const;

@@ -189,6 +189,48 @@ export const prevPeriodAnchor = (key: string, period: GoalPeriod) =>
 export const nextPeriodAnchor = (key: string, period: GoalPeriod) =>
   shiftPeriodKey(key, period, 1);
 
+/**
+ * Enumerate ISO week keys from `currentKey` through the chosen end horizon.
+ * Inclusive on both ends. Stops at the last week whose Thursday lies within
+ * the horizon (ISO weeks belong to the year/month of their Thursday).
+ *
+ *   enumerateWeeksThrough("2026-W21", "endOfYear", "2026")  → ~32 keys
+ *   enumerateWeeksThrough("2026-W21", "endOfMonth", "2026-08") → ~14 keys
+ *
+ * Returns [currentKey] only if the end is before the current week. Caller
+ * is responsible for surfacing that as an error if it matters.
+ */
+export function enumerateWeeksThrough(
+  currentKey: string,
+  endKind: "endOfMonth" | "endOfYear",
+  endRef: string,
+): string[] {
+  let endDate: DateString;
+  if (endKind === "endOfYear") {
+    if (!/^\d{4}$/.test(endRef)) throw new Error(`endRef for endOfYear must be YYYY: ${endRef}`);
+    endDate = `${endRef}-12-31`;
+  } else {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(endRef)) {
+      throw new Error(`endRef for endOfMonth must be YYYY-MM: ${endRef}`);
+    }
+    const { end } = periodRangeFor(endRef, "month");
+    endDate = end;
+  }
+  const out: string[] = [currentKey];
+  let k = currentKey;
+  // Safety bound: never enumerate more than ~110 weeks.
+  for (let i = 0; i < 110; i++) {
+    const next = shiftPeriodKey(k, "week", 1);
+    // Next week's Thursday is the canonical "which year/month does it belong to" anchor.
+    const nextStart = periodRangeFor(next, "week").start;
+    const nextThursday = addDays(nextStart, 4);
+    if (nextThursday > endDate) break;
+    out.push(next);
+    k = next;
+  }
+  return out;
+}
+
 /** Quick format helper for human-readable period labels. */
 export function formatPeriodRange(key: string, period: GoalPeriod): string {
   if (period === "year") return key;
