@@ -2,12 +2,33 @@
  * Local-time date helpers. The journal stores one entry per *calendar* day
  * in the user's local timezone. Never use UTC ISO formatting for entry keys —
  * a 00:30 entry would land in the wrong day.
+ *
+ * `todayLocal()` resolves to the user's calendar day in `APP_TZ` (defaults to
+ * Asia/Kolkata for this single-user app). This matters on Vercel which runs
+ * Node processes in UTC: without the explicit Intl call, at 5 AM IST the
+ * server still thinks "today" is yesterday.
+ *
+ * Other helpers (`parseDate`, `addDays`, etc.) operate on the YYYY-MM-DD
+ * string itself, so they round-trip correctly inside any runtime TZ — only
+ * the "what is today's date?" reading needs the explicit timezone.
  */
+
+const APP_TZ = process.env.APP_TZ || "Asia/Kolkata";
+const TODAY_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: APP_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 export type DateString = string; // YYYY-MM-DD
 
 export function todayLocal(): DateString {
-  return formatLocalYMD(new Date());
+  const parts = TODAY_FMT.formatToParts(new Date());
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${d}`;
 }
 
 export function formatLocalYMD(d: Date): DateString {
