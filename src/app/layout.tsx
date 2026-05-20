@@ -61,9 +61,23 @@ export default function RootLayout({
           <Toaster position="top-center" richColors />
         </ThemeProvider>
         <Script id="register-sw" strategy="afterInteractive">
-          {`if ('serviceWorker' in navigator && location.protocol === 'https:' || location.hostname === 'localhost') {
+          {`if ('serviceWorker' in navigator) {
+  // Register the SW only on HTTPS production deploys. On localhost (dev),
+  // proactively unregister any stale SW so Turbopack-rebuilt chunks aren't
+  // served from cache. Cached _next/static chunks from a previous session
+  // can make the layout look unstyled ("bottom nav as a list").
+  const isProd = location.protocol === 'https:' && location.hostname !== 'localhost';
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    if (isProd) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    } else {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const r of regs) r.unregister().catch(() => {});
+      }).catch(() => {});
+      if (window.caches) {
+        caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+      }
+    }
   });
 }`}
         </Script>

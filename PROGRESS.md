@@ -492,6 +492,121 @@ User-reported issues from the installed PWA:
 
 ---
 
+## ✅ Phase 4 · Part 2 — Goals feature (weekly / monthly / yearly)
+
+Plan: `C:\Users\Admin\.claude\plans\now-let-s-build-a-partitioned-floyd.md`. Three-slice rollout (B / C / D) on commits `6a7a090`, `f4c88cb`, plus the post-verify cleanup committed alongside this entry.
+
+**Concept:** fourth pillar alongside Journal / Habits / Pomodoro. Single tab with a Week / Month / Year segmented control. Per-period dashboard with progress cards, donut summary, history strip, cascade rollups, year heatmap, and an auto-finalize + reflection sheet at period close. Routes follow the existing `/route/[period]/[anchor]` pattern.
+
+**Bottom nav rewired:** Insights demoted into `/more`; new `/goals` slot (lucide `Target` icon). Final order: Journal · Habits · Pomodoro · Goals · More.
+
+### Schema — migration `0003_dizzy_captain_marvel.sql` (applied locally; prod pending)
+
+- `goals` — single table for week + month + year. Columns: id, `period` enum, `periodKey` (e.g. `2026-W21`, `2026-05`, `2026`), `parentId` (self-FK for cascade), title/emoji/color, `type` enum (`number | habit | pomodoro | milestone`), `targetValue`/`unit`, `habitId` + `pomoCategoryId` + `pomoMetric` for linked variants, `status` enum (`active | achieved | missed | archived`), `finalizedAt`, reflection fields (`reflectionNote/Rating/LinkedDate/SavedAt`), position, archivedAt, createdAt. Indexes on `(period, periodKey)`, `parentId`, `status`.
+- `goal_progress` — log of number-target increments. `(goalId FK cascade, date, delta, note, createdAt)`, indexed on `(goalId, date)`.
+- `goal_checklist` — milestone sub-tasks. `(goalId FK cascade, text, done, position)`.
+
+One `goals` table (not three) because the composite `(period, periodKey)` index covers every read. Habit + pomodoro currentValue is **derived live** in queries, never duplicated.
+
+### Lib additions
+
+- `src/lib/dates.ts` — `weekStartOf`, `isoWeekKey` (ISO 8601, Jan-edge year may differ), `periodKeyFor`, `periodRangeFor` (Sun-start display for weeks; explicitly documented), `weeksInYear` (52 or 53), `shiftPeriodKey` (pivots off the period's Thursday so week ± steps land in the right ISO week — a +7-day shift from Sun-start lands in the same ISO week, see `src/lib/dates.ts:114-119`), `prevPeriodAnchor`/`nextPeriodAnchor`, `formatPeriodRange`.
+- `src/lib/goal-meta.ts` — period/type/status enums + labels, `computeGoalPace` (linear pace model with `not-started | behind | at-risk | on-track | ahead | achieved | missed` pills), `computeGoalStatus` (maps pace to shared `JournalStatus` palette so heatmap reuses CSS vars), `autoSplitTargets` (largest-remainder integer split for cascading), `daysRemaining`, `isPeriodClosed`. Re-exports `PRESET_COLORS` from habit-meta so swatch UI is identical.
+
+### Queries (`src/db/queries/goals.ts`)
+
+- `getGoalsForPeriod(period, periodKey)` — main read. Derives `currentValue` per type:
+  - **number**: `SUM(goal_progress.delta)` for the goal.
+  - **habit**: `COUNT(habit_logs)` for the linked habitId within `periodRangeFor(...)`.
+  - **pomodoro**: `SUM(durationMin)` / `SUM(pomoUnits(durationMin))` / `COUNT(*)` filtered by optional `categoryId` and the metric (uses `pomoUnits` from `pomodoro-meta`).
+  - **milestone**: `done count` of inline `goal_checklist` items.
+  - Also lazily **auto-finalizes** any `active` goal whose period has already ended (read-time, idempotent, no cron). Mutates in-process so the same render sees the new status.
+- `getGoalsHistory(period, currentKey, count)` — last N periods preceding `currentKey`, each with its derived goals (used by the history strip).
+- `getGoalsYearHeatmap(year)` — per-ISO-week status map for the year view's 52/53-cell grid. Only weekly goals roll into the cell color so month/year aggregates don't dominate.
+- `getChildrenOfGoal(parentId)` — child goal rollup for cascade display.
+- All shapes are arrays / plain objects, never `Map` (RSC rule).
+
+### Actions (`src/app/actions/goals.ts`)
+
+`"use server"`, only async exports (rule #6). Every mutation `revalidatePath("/goals", "layout")`.
+
+- `createGoal({ ..., autoSplitChildren? })` — validates inputs (period/key/type enums, color hex, length caps), inserts. If `autoSplitChildren && period in {year, month}`, calls internal `createCascadeChildren` to spawn children (year → 12 months, month → ISO weeks whose Thursday lies inside the month). Skips past periods.
+- `updateGoal`, `deleteGoal`, `archiveGoal`/`unarchiveGoal`.
+- `logProgress({ goalId, delta, note?, date? })` for number-type increments.
+- `addChecklistItem` / `updateChecklistItem` / `toggleChecklistItem` / `deleteChecklistItem`.
+- `finalizePeriod` (still callable; auto-trigger lives in `getGoalsForPeriod`).
+- `saveReflection({ goalId, note, rating, linkedDate? })` — stamps reflection columns on the goal. When `linkedDate` is provided, also `ensureEntry(linkedDate)` + inserts a checked-off `secondary` `journal_tasks` row with `"Reflect: {title} — {note excerpt}"`. Idempotent, doesn't trample journal autosave state.
+
+### Routes
+
+```
+src/app/goals/
+  page.tsx                          // client redirect → /goals/week/{isoWeekKey(today)}
+  loading.tsx
+  [period]/
+    page.tsx                        // client redirect → /goals/{period}/{periodKeyFor(today, period)}
+    [anchor]/
+      page.tsx                      // server: validates, fetches in parallel, renders
+      loading.tsx
+      not-found.tsx
+      _components/
+        period-toggle.tsx           // Week / Month / Year pill row
+        goal-period-stepper.tsx     // prev/next chevrons + label; allows one period ahead of today
+        period-summary-card.tsx     // SVG donut + "N on track · X days left"
+        goal-card.tsx               // dispatcher by goal.type
+        goal-card-number.tsx        // client; progress bar + Log-progress dialog
+        goal-card-habit.tsx         // server; derived count, links to /habits
+        goal-card-pomodoro.tsx      // server; derived metric, links to /pomodoro
+        goal-card-milestone.tsx     // client; optimistic checklist toggles
+        add-goal-button.tsx
+        goal-form-dialog.tsx        // type-switcher reveals fields; habit + pomo pickers; autoSplit toggle for year/month with live preview
+        cascade-children.tsx        // dashed-border footer card listing child periods (tappable)
+        history-strip.tsx           // 5-period chip row, colored by aggregated achievement
+        year-heatmap.tsx            // 52/53 cell row on year view; tappable to navigate
+        reflection-banner.tsx       // page-level "Reflect on N closed goals →"
+        reflection-prompt.tsx       // per-card client wrapper opening the sheet
+        reflection-sheet.tsx        // base-ui Dialog side=bottom; stars + note + journal link toggle
+        goals-empty-state.tsx
+```
+
+### Local dev SW gating (post-verify fix)
+
+`src/app/layout.tsx` — the service-worker registration script was also active on `localhost`, which made the SW cache `/_next/static/...` chunks. Turbopack rebuilds change chunk hashes; once a stale entry was in cache, the dev page rendered with broken Tailwind (symptom: bottom nav rendered as a vertical `<li>` list). Now gates registration to `https:` AND non-`localhost` hostname, and **actively unregisters any existing SW + clears all `caches.keys()` on localhost**. Localhost users only need to hard-reload once after pulling this fix; the layout cleans up the state on its own.
+
+### Week stepper bug fix (post-verify)
+
+`src/lib/dates.ts` — `shiftPeriodKey(key, "week", delta)` previously computed `addDays(periodRangeFor(key, "week").start, delta * 7)`. Our display range is Sun-start, but Sunday belongs to the *previous* ISO week (ISO weeks end on Sunday), so shifting from `start` by +7 days landed inside the SAME ISO week — the right arrow in the week stepper did nothing. Now pivots off the period's **Thursday** (`addDays(start, 4)`), which is always unambiguously inside the current ISO week, and `addDays(thu, delta * 7)` lands in the correct next/prev ISO week.
+
+### PWA
+
+`public/sw.js` — `VERSION` bumped `habit-log-v4` → `habit-log-v5`. `/goals` added to the `SHELL` array.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 13 warnings (all `react-hooks/set-state-in-effect`, the accepted exemption pattern). Goals form dialog + reflection sheet added 4 more of the same kind; no new categories of warning.
+- `npm run build` clean — 18 routes. New: `/goals` (○), `/goals/[period]` (ƒ), `/goals/[period]/[anchor]` (ƒ).
+- Local probes: `/goals` (302→week), `/goals/week/2026-W21`, `/goals/month/2026-05`, `/goals/year/2026` all 200.
+- User manually verified end-to-end: bottom nav, period toggle, goal creation across types, log-progress, checklist toggles, cascade auto-split preview, week stepper after fix.
+
+### Deploy (this commit)
+
+1. `npm run db:migrate` against prod Turso (`.env.production.local` env loaded via PowerShell). Applies `0003_dizzy_captain_marvel.sql`.
+2. `vercel --prod --yes` from `Habit_Log/`.
+3. PWA: installed phones pick up the new `/goals` route + `habit-log-v5` shell on next SW activation. iOS Safari home-screen icon stays cached at install time — remove + reinstall to refresh.
+
+### Things deferred to Part 2.1+ (no fixed order)
+
+- Insights "Goals" section (monthly completion chart, longest streak card, year heatmap reused).
+- "Regenerate children" toggle on the edit dialog (current parent edits don't auto-rebalance future children).
+- Drag-and-drop reorder for goals/sub-tasks (the `position` column is wired for it).
+- Per-day "log progress" snapshots viz (the `goal_progress` log already supports it — UI is the missing piece).
+- Reflection summary view (browse reflections across periods in one place).
+
+**Resume here for next session:** Goals feature shipped. Awaiting user direction on the next feature.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

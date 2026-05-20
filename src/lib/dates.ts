@@ -176,8 +176,12 @@ export function shiftPeriodKey(key: string, period: GoalPeriod, delta: number): 
   if (period === "month") {
     return shiftMonth(start, delta).slice(0, 7);
   }
-  // week: shift by N*7 days then re-derive the ISO key.
-  return isoWeekKey(addDays(start, delta * 7));
+  // Week: our display range is Sun-start, but Sunday belongs to the
+  // *previous* ISO week (ISO weeks end on Sunday), so shifting from `start`
+  // by 7 days lands inside the same ISO week. Pivot off the period's
+  // Thursday — it's always unambiguously in the current ISO week.
+  const thu = addDays(start, 4);
+  return isoWeekKey(addDays(thu, delta * 7));
 }
 
 export const prevPeriodAnchor = (key: string, period: GoalPeriod) =>
