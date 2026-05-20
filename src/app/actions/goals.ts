@@ -1,13 +1,31 @@
 "use server";
 
 import { db } from "@/db/client";
-import { goals, goalProgress, goalChecklist } from "@/db/schema";
+import { goals, goalProgress, goalChecklist, journalTasks, journalEntries } from "@/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
-import { isValidDateString, todayLocal, type GoalPeriod } from "@/lib/dates";
+import {
+  addDays,
+  isValidDateString,
+  isoWeekKey,
+  monthKeyOf,
+  periodKeyFor,
+  periodRangeFor,
+  shiftPeriodKey,
+  todayLocal,
+  type GoalPeriod,
+} from "@/lib/dates";
 import { findGoalById, nextPositionFor } from "@/db/queries/goals";
-import { PRESET_COLORS, GOAL_PERIODS, GOAL_TYPES, type GoalType, type PomoMetric } from "@/lib/goal-meta";
+import { ensureEntry, nextTaskPosition } from "@/db/queries/journal-tasks";
+import {
+  PRESET_COLORS,
+  GOAL_PERIODS,
+  GOAL_TYPES,
+  autoSplitTargets,
+  type GoalType,
+  type PomoMetric,
+} from "@/lib/goal-meta";
 
 const MAX_TITLE_LEN = 120;
 const MAX_EMOJI_LEN = 8;
@@ -118,6 +136,7 @@ export async function createGoal(input: {
   pomoCategoryId?: string | null;
   pomoMetric?: PomoMetric | null;
   parentId?: string | null;
+  autoSplitChildren?: boolean;
 }): Promise<{ id: string }> {
   const period = assertPeriod(input.period);
   const periodKey = assertPeriodKey(input.periodKey, period);
@@ -157,8 +176,111 @@ export async function createGoal(input: {
     status: "active",
     position,
   });
+
+  if (
+    input.autoSplitChildren &&
+    (period === "year" || period === "month") &&
+    type !== "milestone" &&
+    targetValue != null &&
+    targetValue > 0
+  ) {
+    await createCascadeChildren({
+      parentId: id,
+      parentPeriod: period,
+      parentKey: periodKey,
+      title,
+      emoji,
+      color,
+      type,
+      targetValue,
+      unit,
+      habitId: input.habitId ?? null,
+      pomoCategoryId: input.pomoCategoryId ?? null,
+      pomoMetric: input.pomoMetric ?? null,
+    });
+  }
+
   revalidateGoals();
   return { id };
+}
+
+/**
+ * Yearly → 12 monthly children. Monthly → ~4 weekly children (ISO weeks
+ * whose Thursday lies in the month). Skips past periods (only creates
+ * current + future children when invoked mid-period).
+ */
+async function createCascadeChildren(opts: {
+  parentId: string;
+  parentPeriod: "year" | "month";
+  parentKey: string;
+  title: string;
+  emoji: string | null;
+  color: string;
+  type: GoalType;
+  targetValue: number;
+  unit: string | null;
+  habitId: string | null;
+  pomoCategoryId: string | null;
+  pomoMetric: PomoMetric | null;
+}) {
+  const today = todayLocal();
+  const childPeriod: GoalPeriod = opts.parentPeriod === "year" ? "month" : "week";
+  const childKeys = enumerateChildKeys(opts.parentPeriod, opts.parentKey);
+  const isReal = opts.unit === "min" || opts.unit === "minutes";
+  const splits = autoSplitTargets(opts.targetValue, childKeys.length, isReal);
+
+  // Filter past — only create children for current or future periods.
+  const future = childKeys
+    .map((key, i) => ({ key, target: splits[i] }))
+    .filter(({ key }) => {
+      const { end } = periodRangeFor(key, childPeriod);
+      return end >= today;
+    });
+
+  for (const { key, target } of future) {
+    const position = await nextPositionFor(childPeriod, key);
+    await db.insert(goals).values({
+      id: nanoid(12),
+      period: childPeriod,
+      periodKey: key,
+      parentId: opts.parentId,
+      title: opts.title,
+      emoji: opts.emoji,
+      color: opts.color,
+      type: opts.type,
+      targetValue: target,
+      unit: opts.unit,
+      habitId: opts.habitId,
+      pomoCategoryId: opts.pomoCategoryId,
+      pomoMetric: opts.pomoMetric,
+      status: "active",
+      position,
+    });
+  }
+}
+
+function enumerateChildKeys(
+  parentPeriod: "year" | "month",
+  parentKey: string,
+): string[] {
+  if (parentPeriod === "year") {
+    return Array.from({ length: 12 }, (_, i) => `${parentKey}-${String(i + 1).padStart(2, "0")}`);
+  }
+  // month → ISO weeks whose Thursday lies in this month
+  const { start, end } = periodRangeFor(parentKey, "month");
+  const seen = new Set<string>();
+  // Iterate every day in the month; pick unique ISO weeks whose Thursday
+  // falls within the month.
+  let d = start;
+  while (d <= end) {
+    const wk = isoWeekKey(d);
+    const wkRange = periodRangeFor(wk, "week");
+    // Thursday of this ISO week:
+    const thu = addDays(wkRange.start, 4); // Sun-start, +4 = Thursday
+    if (thu >= start && thu <= end) seen.add(wk);
+    d = addDays(d, 1);
+  }
+  return Array.from(seen).sort();
 }
 
 export async function updateGoal(input: {
@@ -358,6 +480,9 @@ export async function saveReflection(input: {
   if (input.linkedDate && !isValidDateString(input.linkedDate)) {
     throw new Error(`Invalid linkedDate: ${input.linkedDate}`);
   }
+  const goal = await findGoalById(input.goalId);
+  if (!goal) throw new Error("Goal not found");
+
   await db
     .update(goals)
     .set({
@@ -367,5 +492,22 @@ export async function saveReflection(input: {
       reflectionSavedAt: new Date(),
     })
     .where(eq(goals.id, input.goalId));
+
+  // Optional: drop a `secondary` task into the journal entry for `linkedDate`.
+  if (input.linkedDate) {
+    await ensureEntry(input.linkedDate);
+    const position = await nextTaskPosition(input.linkedDate, "secondary");
+    const excerpt = note.length > 80 ? note.slice(0, 77) + "…" : note;
+    await db.insert(journalTasks).values({
+      id: nanoid(12),
+      date: input.linkedDate,
+      kind: "secondary",
+      text: `Reflect: ${goal.title} — ${excerpt}`,
+      done: true,
+      position,
+    });
+    revalidatePath(`/journal/${input.linkedDate}`);
+  }
+
   revalidateGoals();
 }

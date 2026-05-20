@@ -1,12 +1,20 @@
 import { db } from "@/db/client";
-import { goals, goalProgress, goalChecklist } from "@/db/schema";
-import { and, asc, eq, inArray, isNull, sum } from "drizzle-orm";
+import {
+  goals,
+  goalProgress,
+  goalChecklist,
+  habitLogs,
+  pomodoroSessions,
+} from "@/db/schema";
+import { and, asc, between, eq, inArray, isNull, sum, count } from "drizzle-orm";
 import {
   periodRangeFor,
+  shiftPeriodKey,
   todayLocal,
   type DateString,
   type GoalPeriod,
 } from "@/lib/dates";
+import { pomoUnits } from "@/lib/pomodoro-meta";
 
 export type GoalRow = typeof goals.$inferSelect;
 export type GoalProgressRow = typeof goalProgress.$inferSelect;
@@ -59,21 +67,81 @@ async function sumProgressForGoals(goalIds: string[]): Promise<Map<string, numbe
   return new Map(rows.map((r) => [r.goalId, r.total ?? 0]));
 }
 
+async function habitCountInRange(
+  habitId: string,
+  start: DateString,
+  end: DateString,
+): Promise<number> {
+  const rows = await db
+    .select({ n: count(habitLogs.date) })
+    .from(habitLogs)
+    .where(and(eq(habitLogs.habitId, habitId), between(habitLogs.date, start, end)));
+  return rows[0]?.n ?? 0;
+}
+
+async function pomodoroValueInRange(
+  pomoCategoryId: string | null,
+  metric: "minutes" | "pomos" | "sessions",
+  start: DateString,
+  end: DateString,
+): Promise<number> {
+  const filters = [between(pomodoroSessions.date, start, end)];
+  if (pomoCategoryId) filters.push(eq(pomodoroSessions.categoryId, pomoCategoryId));
+  const rows = await db
+    .select({ duration: pomodoroSessions.durationMin })
+    .from(pomodoroSessions)
+    .where(and(...filters));
+  if (metric === "sessions") return rows.length;
+  if (metric === "minutes") return rows.reduce((acc, r) => acc + (r.duration ?? 0), 0);
+  // pomos
+  return rows.reduce((acc, r) => acc + pomoUnits(r.duration ?? 0), 0);
+}
+
 /**
- * Derive currentValue per goal type. Day B implements number + milestone.
- * Habit / pomodoro types return 0 here and will be filled in Day C.
+ * Derive currentValue per goal type.
+ *  - number:    SUM(goalProgress.delta) for the goal
+ *  - habit:     COUNT(habit_logs) where date in period range
+ *  - pomodoro:  SUM/COUNT pomodoroSessions filtered by category + metric
+ *  - milestone: COUNT of done checklist items
  */
-async function deriveCurrentValues(rows: GoalRow[]): Promise<{
+async function deriveCurrentValues(
+  rows: GoalRow[],
+  rangeFor: (g: GoalRow) => { start: DateString; end: DateString },
+): Promise<{
   values: Map<string, number>;
   checklists: Map<string, GoalChecklistItem[]>;
 }> {
   const numberIds = rows.filter((r) => r.type === "number").map((r) => r.id);
   const milestoneIds = rows.filter((r) => r.type === "milestone").map((r) => r.id);
+  const habitGoals = rows.filter((r) => r.type === "habit" && r.habitId);
+  const pomoGoals = rows.filter((r) => r.type === "pomodoro" && r.pomoMetric);
 
-  const [numberTotals, checklists] = await Promise.all([
+  const [numberTotals, checklists, habitCounts, pomoValues] = await Promise.all([
     sumProgressForGoals(numberIds),
     listChecklistsForGoals(milestoneIds),
+    Promise.all(
+      habitGoals.map(async (g) => {
+        const { start, end } = rangeFor(g);
+        const n = await habitCountInRange(g.habitId!, start, end);
+        return [g.id, n] as const;
+      }),
+    ),
+    Promise.all(
+      pomoGoals.map(async (g) => {
+        const { start, end } = rangeFor(g);
+        const n = await pomodoroValueInRange(
+          g.pomoCategoryId ?? null,
+          g.pomoMetric as "minutes" | "pomos" | "sessions",
+          start,
+          end,
+        );
+        return [g.id, n] as const;
+      }),
+    ),
   ]);
+
+  const habitMap = new Map(habitCounts);
+  const pomoMap = new Map(pomoValues);
 
   const values = new Map<string, number>();
   for (const r of rows) {
@@ -82,8 +150,11 @@ async function deriveCurrentValues(rows: GoalRow[]): Promise<{
     } else if (r.type === "milestone") {
       const items = checklists.get(r.id) ?? [];
       values.set(r.id, items.filter((i) => i.done).length);
+    } else if (r.type === "habit") {
+      values.set(r.id, habitMap.get(r.id) ?? 0);
+    } else if (r.type === "pomodoro") {
+      values.set(r.id, pomoMap.get(r.id) ?? 0);
     } else {
-      // habit / pomodoro: 0 until Day C
       values.set(r.id, 0);
     }
   }
@@ -93,14 +164,19 @@ async function deriveCurrentValues(rows: GoalRow[]): Promise<{
 // ---------- Public API ----------
 
 /**
- * Fetch all goals for a (period, periodKey) including derived currentValue and
- * (for milestones) inline checklist items. Children of cascaded parents are
- * NOT grafted in here — that comes in Day D with the multi-period cascade view.
+ * Fetch all goals for a (period, periodKey) including derived currentValue
+ * and (for milestones) inline checklist items.
+ *
+ * Auto-finalize: if the period's `end < today` and any goal is still
+ * `active`, this stamps them to `achieved` / `missed` based on derived
+ * progress. Idempotent — only touches rows with `finalizedAt = null`. No
+ * cron required.
  */
 export async function getGoalsForPeriod(
   period: GoalPeriod,
   periodKey: string,
 ): Promise<GoalWithDerived[]> {
+  const range = periodRangeFor(periodKey, period);
   const rows = await db
     .select()
     .from(goals)
@@ -115,8 +191,143 @@ export async function getGoalsForPeriod(
 
   if (rows.length === 0) return [];
 
-  const { values, checklists } = await deriveCurrentValues(rows);
+  const rangeFor = () => range;
 
+  const { values, checklists } = await deriveCurrentValues(rows, rangeFor);
+
+  // Lazy auto-finalize for closed periods.
+  const today = todayLocal();
+  if (range.end < today) {
+    const stillActive = rows.filter(
+      (r) => r.status === "active" && r.finalizedAt == null,
+    );
+    if (stillActive.length > 0) {
+      const now = new Date();
+      await Promise.all(
+        stillActive.map(async (g) => {
+          let achieved = false;
+          const target = g.targetValue;
+          const current = values.get(g.id) ?? 0;
+          if (g.type === "milestone") {
+            const items = checklists.get(g.id) ?? [];
+            achieved = items.length > 0 && items.every((i) => i.done);
+          } else if (target != null && target > 0) {
+            achieved = current >= target;
+          }
+          await db
+            .update(goals)
+            .set({ status: achieved ? "achieved" : "missed", finalizedAt: now })
+            .where(eq(goals.id, g.id));
+          // Reflect locally so this read sees the new status.
+          (g as GoalRow).status = achieved ? "achieved" : "missed";
+          (g as GoalRow).finalizedAt = now;
+        }),
+      );
+    }
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    currentValue: values.get(r.id) ?? 0,
+    checklist: r.type === "milestone" ? checklists.get(r.id) ?? [] : undefined,
+  }));
+}
+
+/**
+ * History strip data: the most recent N periods preceding `currentKey`.
+ * Returns an entry per period containing the goals (with derived values)
+ * so the caller can render colored summary chips.
+ */
+export async function getGoalsHistory(
+  period: GoalPeriod,
+  currentKey: string,
+  count: number,
+): Promise<Array<{ periodKey: string; goals: GoalWithDerived[] }>> {
+  const keys: string[] = [];
+  let k = currentKey;
+  for (let i = 0; i < count; i++) {
+    k = shiftPeriodKey(k, period, -1);
+    keys.push(k);
+  }
+  const results: Array<{ periodKey: string; goals: GoalWithDerived[] }> = [];
+  for (const key of keys) {
+    const goalsForKey = await getGoalsForPeriod(period, key);
+    results.push({ periodKey: key, goals: goalsForKey });
+  }
+  return results;
+}
+
+/**
+ * Per-week status map for the goals heatmap on the year view. Computed by
+ * loading all goals for the year (and its month/week children) and folding
+ * them per ISO week into the shared status palette.
+ */
+export async function getGoalsYearHeatmap(
+  year: number,
+): Promise<{ byWeek: Record<string, "crazy" | "great" | "good" | "avg" | "bad" | "empty"> }> {
+  // Pull every goal whose periodKey starts with the year.
+  const allRows = await db
+    .select()
+    .from(goals)
+    .where(isNull(goals.archivedAt));
+  const yearStr = String(year);
+  const inYear = allRows.filter((r) => r.periodKey.startsWith(yearStr));
+  if (inYear.length === 0) return { byWeek: {} };
+
+  const { values, checklists } = await deriveCurrentValues(inYear, (g) =>
+    periodRangeFor(g.periodKey, g.period as GoalPeriod),
+  );
+
+  // Group week-period goals by week; ignore month/year aggregates for the
+  // cell color (they'd otherwise dominate the heatmap with their own status).
+  const weeklyByKey = new Map<string, typeof inYear>();
+  for (const g of inYear) {
+    if (g.period !== "week") continue;
+    let arr = weeklyByKey.get(g.periodKey);
+    if (!arr) {
+      arr = [];
+      weeklyByKey.set(g.periodKey, arr);
+    }
+    arr.push(g);
+  }
+
+  const byWeek: Record<string, "crazy" | "great" | "good" | "avg" | "bad" | "empty"> = {};
+  const today = todayLocal();
+  for (const [weekKey, group] of weeklyByKey) {
+    let achieved = 0;
+    for (const g of group) {
+      const target =
+        g.type === "milestone"
+          ? (checklists.get(g.id)?.length ?? 0) || 1
+          : g.targetValue ?? null;
+      const cur = values.get(g.id) ?? 0;
+      if (target != null && target > 0 && cur >= target) achieved++;
+    }
+    const ratio = achieved / group.length;
+    byWeek[weekKey] =
+      ratio >= 1 ? "crazy" : ratio >= 0.66 ? "great" : ratio >= 0.33 ? "good" : ratio > 0 ? "avg" : "bad";
+    void today;
+  }
+
+  return { byWeek };
+}
+
+/**
+ * Children grafted onto a parent goal. Used for cascade rollup display on
+ * year/month view. Returns child rows with derived currentValue.
+ */
+export async function getChildrenOfGoal(
+  parentId: string,
+): Promise<GoalWithDerived[]> {
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.parentId, parentId), isNull(goals.archivedAt)))
+    .orderBy(asc(goals.periodKey));
+  if (rows.length === 0) return [];
+  const { values, checklists } = await deriveCurrentValues(rows, (g) =>
+    periodRangeFor(g.periodKey, g.period as GoalPeriod),
+  );
   return rows.map((r) => ({
     ...r,
     currentValue: values.get(r.id) ?? 0,

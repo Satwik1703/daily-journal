@@ -6,14 +6,21 @@ import { Button } from "@/components/ui/button";
 import { GoalFormDialog } from "./goal-form-dialog";
 import type { GoalPeriod } from "@/lib/dates";
 
+export type HabitOption = { id: string; name: string; emoji: string | null; color: string };
+export type CategoryOption = { id: string; name: string; emoji: string | null; color: string };
+
 export function AddGoalButton({
   period,
   periodKey,
   disabled = false,
+  habits,
+  categories,
 }: {
   period: GoalPeriod;
   periodKey: string;
   disabled?: boolean;
+  habits: HabitOption[];
+  categories: CategoryOption[];
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -32,6 +39,8 @@ export function AddGoalButton({
         onOpenChange={setOpen}
         period={period}
         periodKey={periodKey}
+        habits={habits}
+        categories={categories}
       />
     </>
   );

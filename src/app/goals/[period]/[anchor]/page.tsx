@@ -8,14 +8,25 @@ import {
   type GoalPeriod,
 } from "@/lib/dates";
 import { GOAL_PERIODS } from "@/lib/goal-meta";
-import { getGoalsForPeriod } from "@/db/queries/goals";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  getChildrenOfGoal,
+  getGoalsForPeriod,
+  getGoalsHistory,
+  getGoalsYearHeatmap,
+} from "@/db/queries/goals";
+import { getActiveHabits } from "@/db/queries/habits";
+import { getActiveCategories } from "@/db/queries/pomodoro-categories";
 import { PeriodToggle } from "./_components/period-toggle";
 import { GoalPeriodStepper } from "./_components/goal-period-stepper";
 import { PeriodSummaryCard } from "./_components/period-summary-card";
 import { GoalCard } from "./_components/goal-card";
 import { AddGoalButton } from "./_components/add-goal-button";
 import { GoalsEmptyState } from "./_components/goals-empty-state";
+import { ReflectionBanner } from "./_components/reflection-banner";
+import { ReflectionPrompt } from "./_components/reflection-prompt";
+import { HistoryStrip } from "./_components/history-strip";
+import { YearHeatmap } from "./_components/year-heatmap";
+import { CascadeChildren } from "./_components/cascade-children";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +62,32 @@ export default async function GoalsPage({
   const isPast = end < today;
   const isFuture = start > today;
 
-  const goalsForPeriod = await getGoalsForPeriod(period, anchor);
+  const [goalsForPeriod, habitOptions, pomoCategories, history] = await Promise.all([
+    getGoalsForPeriod(period, anchor),
+    getActiveHabits(),
+    getActiveCategories(),
+    getGoalsHistory(period, anchor, 5),
+  ]);
+
+  // Year-only: pull the weekly heatmap aggregated for this year.
+  const yearHeatmap =
+    period === "year"
+      ? await getGoalsYearHeatmap(Number(anchor))
+      : null;
+
+  // Cascade children: fetch only for parents on year/month views.
+  const childrenByParent =
+    period !== "week"
+      ? Object.fromEntries(
+          await Promise.all(
+            goalsForPeriod.map(async (g) => [g.id, await getChildrenOfGoal(g.id)] as const),
+          ),
+        )
+      : {};
+
+  const goalsNeedingReflection = goalsForPeriod.filter(
+    (g) => g.finalizedAt != null && g.reflectionSavedAt == null && g.status !== "archived",
+  );
 
   // ISO week sanity check: caller may pass a future week key that lexicographically
   // exceeds today's. We allow browsing future periods (just like /habits/[date] does
@@ -74,10 +110,16 @@ export default async function GoalsPage({
           period={period}
           periodKey={anchor}
           disabled={isPast}
+          habits={habitOptions.map((h) => ({ id: h.id, name: h.name, emoji: h.emoji, color: h.color }))}
+          categories={pomoCategories.map((c) => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color }))}
         />
       </div>
 
       <PeriodToggle current={period} anchor={anchor} todayWeekKey={todayWeekKey} />
+
+      <ReflectionBanner
+        count={goalsNeedingReflection.length}
+      />
 
       <PeriodSummaryCard
         goals={goalsForPeriod}
@@ -89,25 +131,45 @@ export default async function GoalsPage({
         <GoalsEmptyState period={period} isPast={isPast} isFuture={isFuture} />
       ) : (
         <div className="space-y-3">
-          {goalsForPeriod.map((goal) => (
-            <GoalCard
-              key={goal.id}
-              goal={goal}
-              periodStart={start}
-              periodEnd={end}
-              today={today}
-            />
-          ))}
+          {goalsForPeriod.map((goal) => {
+            const needsReflection =
+              goal.finalizedAt != null &&
+              goal.reflectionSavedAt == null &&
+              goal.status !== "archived";
+            const isFirstReflect =
+              needsReflection && goal.id === goalsNeedingReflection[0]?.id;
+            const children = childrenByParent[goal.id] ?? [];
+            return (
+              <div key={goal.id} className="space-y-0">
+                <GoalCard
+                  goal={goal}
+                  periodStart={start}
+                  periodEnd={end}
+                  today={today}
+                  habits={habitOptions}
+                  categories={pomoCategories}
+                />
+                {children.length > 0 ? (
+                  <CascadeChildren items={children} today={today} />
+                ) : null}
+                {needsReflection ? (
+                  <ReflectionPrompt
+                    goal={goal}
+                    periodEnd={end}
+                    anchorId={isFirstReflect ? "first-reflect" : undefined}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {goalsForPeriod.length > 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="py-3 text-center text-xs text-muted-foreground">
-            More goal types — habit-linked, pomodoro-linked — landing in the next slice.
-          </CardContent>
-        </Card>
+      {yearHeatmap ? (
+        <YearHeatmap year={Number(anchor)} byWeek={yearHeatmap.byWeek} />
       ) : null}
+
+      <HistoryStrip period={period} history={history} today={today} />
     </div>
   );
 }
