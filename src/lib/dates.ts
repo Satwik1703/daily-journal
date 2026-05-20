@@ -84,3 +84,121 @@ export function monthMatrix(s: DateString): DateString[] {
   for (let i = 0; i < 42; i++) out.push(addDays(start, i));
   return out;
 }
+
+// ---------- Goal periods (week / month / year) ----------
+
+export type GoalPeriod = "week" | "month" | "year";
+
+/** Sunday-anchored start of the calendar week containing s. Matches monthMatrix's Sun-start. */
+export function weekStartOf(s: DateString): DateString {
+  const d = parseDate(s);
+  return addDays(s, -d.getDay());
+}
+
+/**
+ * ISO 8601 week key: "YYYY-Www". Note the year may differ from the calendar
+ * year for early-Jan / late-Dec dates (2026-01-01 → "2025-W53"). Use this for
+ * the `periodKey` column on weekly goals so weeks are unambiguous.
+ */
+export function isoWeekKey(s: DateString): string {
+  // Standard ISO algorithm: shift to nearest Thursday, then compute week number.
+  const d = parseDate(s);
+  // Adjust to Thursday of the same ISO week. ISO: Mon=1..Sun=7. JS: Sun=0..Sat=6.
+  const isoDay = d.getDay() === 0 ? 7 : d.getDay();
+  d.setDate(d.getDate() + 4 - isoDay);
+  const isoYear = d.getFullYear();
+  // Week 1 contains Jan 4 by definition.
+  const jan4 = new Date(isoYear, 0, 4);
+  const jan4IsoDay = jan4.getDay() === 0 ? 7 : jan4.getDay();
+  const week1Thu = new Date(isoYear, 0, 4 + (4 - jan4IsoDay));
+  const weekNo = 1 + Math.round((d.getTime() - week1Thu.getTime()) / (7 * 86_400_000));
+  return `${isoYear}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+/** periodKey for a given date and period. */
+export function periodKeyFor(s: DateString, period: GoalPeriod): string {
+  if (period === "week") return isoWeekKey(s);
+  if (period === "month") return s.slice(0, 7);
+  return s.slice(0, 4);
+}
+
+/**
+ * Inverse of periodKeyFor: { start, end } DateStrings (inclusive) for the
+ * calendar span covered by a periodKey. For weeks we render Sun→Sat in the UI
+ * even though the ISO key is Mon→Sun-anchored; we explicitly use the Sunday of
+ * the ISO week's Thursday to keep display consistent with the rest of the app.
+ */
+export function periodRangeFor(
+  key: string,
+  period: GoalPeriod,
+): { start: DateString; end: DateString } {
+  if (period === "year") {
+    return { start: `${key}-01-01`, end: `${key}-12-31` };
+  }
+  if (period === "month") {
+    const start = `${key}-01` as DateString;
+    const next = shiftMonth(start, 1);
+    const end = addDays(next, -1);
+    return { start, end };
+  }
+  // week
+  const m = key.match(/^(\d{4})-W(\d{2})$/);
+  if (!m) throw new Error(`Invalid week key: ${key}`);
+  const isoYear = Number(m[1]);
+  const weekNo = Number(m[2]);
+  // Find Thursday of the requested ISO week (which determines the week's year).
+  const jan4 = new Date(isoYear, 0, 4);
+  const jan4IsoDay = jan4.getDay() === 0 ? 7 : jan4.getDay();
+  const week1Thu = new Date(isoYear, 0, 4 + (4 - jan4IsoDay));
+  const targetThu = new Date(week1Thu.getTime());
+  targetThu.setDate(targetThu.getDate() + (weekNo - 1) * 7);
+  // Step back to Sunday of that calendar week for display.
+  const start = addDays(formatLocalYMD(targetThu), -targetThu.getDay());
+  const end = addDays(start, 6);
+  return { start, end };
+}
+
+/** Number of ISO weeks (52 or 53) in a given calendar year. */
+export function weeksInYear(year: number): number {
+  // A year has 53 ISO weeks iff Jan 1 or Dec 31 is a Thursday (or in leap years, either).
+  const jan1 = new Date(year, 0, 1).getDay();
+  const dec31 = new Date(year, 11, 31).getDay();
+  return jan1 === 4 || dec31 === 4 ? 53 : 52;
+}
+
+/** Step a periodKey by ±N units (negative = past, positive = future). */
+export function shiftPeriodKey(key: string, period: GoalPeriod, delta: number): string {
+  if (delta === 0) return key;
+  const { start } = periodRangeFor(key, period);
+  if (period === "year") {
+    return String(Number(key) + delta);
+  }
+  if (period === "month") {
+    return shiftMonth(start, delta).slice(0, 7);
+  }
+  // week: shift by N*7 days then re-derive the ISO key.
+  return isoWeekKey(addDays(start, delta * 7));
+}
+
+export const prevPeriodAnchor = (key: string, period: GoalPeriod) =>
+  shiftPeriodKey(key, period, -1);
+export const nextPeriodAnchor = (key: string, period: GoalPeriod) =>
+  shiftPeriodKey(key, period, 1);
+
+/** Quick format helper for human-readable period labels. */
+export function formatPeriodRange(key: string, period: GoalPeriod): string {
+  if (period === "year") return key;
+  const { start, end } = periodRangeFor(key, period);
+  if (period === "month") {
+    return `${MONTHS[parseDate(start).getMonth()]} ${parseDate(start).getFullYear()}`;
+  }
+  // week
+  const a = parseDate(start);
+  const b = parseDate(end);
+  const sameMonth = a.getMonth() === b.getMonth();
+  const left = `${MONTHS_SHORT[a.getMonth()]} ${a.getDate()}`;
+  const right = sameMonth
+    ? `${b.getDate()}`
+    : `${MONTHS_SHORT[b.getMonth()]} ${b.getDate()}`;
+  return `${left} – ${right}, ${b.getFullYear()}`;
+}

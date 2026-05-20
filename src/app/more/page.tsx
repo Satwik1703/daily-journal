@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Dumbbell, Settings, ChevronRight } from "lucide-react";
+import { Dumbbell, Settings, BarChart3, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 type MoreItem = {
@@ -10,6 +10,12 @@ type MoreItem = {
 };
 
 const items: MoreItem[] = [
+  {
+    href: "/insights",
+    label: "Insights",
+    description: "Trends across journal, habits, and focus.",
+    Icon: BarChart3,
+  },
   {
     href: "/gym",
     label: "Gym",

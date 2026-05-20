@@ -3,8 +3,10 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   primaryKey,
   index,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 // ---------- Journal ----------
@@ -160,6 +162,96 @@ export const pomodoroSessions = sqliteTable(
     index("pomodoro_sessions_date").on(t.date),
     index("pomodoro_sessions_category").on(t.categoryId),
   ],
+);
+
+// ---------- Goals (weekly / monthly / yearly) ----------
+
+export const goals = sqliteTable(
+  "goals",
+  {
+    id: text("id").primaryKey(),
+    // Period namespace. `periodKey` is scoped to this enum:
+    //   week  -> "2026-W21"     (ISO 8601 week)
+    //   month -> "2026-05"
+    //   year  -> "2026"
+    period: text("period", { enum: ["week", "month", "year"] }).notNull(),
+    periodKey: text("period_key").notNull(),
+    parentId: text("parent_id").references((): AnySQLiteColumn => goals.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    emoji: text("emoji"),
+    color: text("color").notNull().default("#10b981"),
+    type: text("type", {
+      enum: ["number", "habit", "pomodoro", "milestone"],
+    }).notNull(),
+    // Target for number/habit/pomodoro types. Milestone uses checklist-only.
+    targetValue: real("target_value"),
+    unit: text("unit"),
+    // Habit-linked
+    habitId: text("habit_id").references(() => habits.id, { onDelete: "set null" }),
+    // Pomodoro-linked
+    pomoCategoryId: text("pomo_category_id").references(
+      () => pomodoroCategories.id,
+      { onDelete: "set null" },
+    ),
+    pomoMetric: text("pomo_metric", {
+      enum: ["minutes", "pomos", "sessions"],
+    }),
+    status: text("status", {
+      enum: ["active", "achieved", "missed", "archived"],
+    })
+      .notNull()
+      .default("active"),
+    finalizedAt: integer("finalized_at", { mode: "timestamp" }),
+    reflectionNote: text("reflection_note"),
+    reflectionRating: integer("reflection_rating"),
+    reflectionLinkedDate: text("reflection_linked_date"),
+    reflectionSavedAt: integer("reflection_saved_at", { mode: "timestamp" }),
+    position: integer("position").notNull().default(0),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    index("goals_period_key").on(t.period, t.periodKey),
+    index("goals_parent").on(t.parentId),
+    index("goals_status").on(t.status),
+  ],
+);
+
+// Number-type increments. One row per "log progress" tap.
+export const goalProgress = sqliteTable(
+  "goal_progress",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    delta: real("delta").notNull().default(0),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("goal_progress_goal_date").on(t.goalId, t.date)],
+);
+
+// Milestone-type sub-tasks. Order = position; done = checked.
+export const goalChecklist = sqliteTable(
+  "goal_checklist",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    done: integer("done", { mode: "boolean" }).notNull().default(false),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [index("goal_checklist_goal").on(t.goalId)],
 );
 
 // ---------- Settings (single-row KV) ----------
