@@ -9,6 +9,7 @@ import {
 } from "@/lib/dates";
 import { GOAL_PERIODS } from "@/lib/goal-meta";
 import {
+  getArchivedGoalsForPeriod,
   getChildrenOfGoal,
   getGoalsForPeriod,
   getGoalsHistory,
@@ -27,6 +28,7 @@ import { ReflectionPrompt } from "./_components/reflection-prompt";
 import { HistoryStrip } from "./_components/history-strip";
 import { YearHeatmap } from "./_components/year-heatmap";
 import { CascadeChildren } from "./_components/cascade-children";
+import { ArchivedGoalsCard } from "./_components/archived-goals-card";
 import { GroupBreak } from "@/components/ui/group-break";
 
 export const dynamic = "force-dynamic";
@@ -63,11 +65,12 @@ export default async function GoalsPage({
   const isPast = end < today;
   const isFuture = start > today;
 
-  const [goalsForPeriod, habitOptions, pomoCategories, history] = await Promise.all([
+  const [goalsForPeriod, habitOptions, pomoCategories, history, archivedGoals] = await Promise.all([
     getGoalsForPeriod(period, anchor),
     getActiveHabits(),
     getActiveCategories(),
     getGoalsHistory(period, anchor, 5),
+    getArchivedGoalsForPeriod(period, anchor),
   ]);
 
   // Year-only: pull the weekly heatmap aggregated for this year.
@@ -213,6 +216,10 @@ export default async function GoalsPage({
 
       {yearHeatmap ? (
         <YearHeatmap year={Number(anchor)} byWeek={yearHeatmap.byWeek} />
+      ) : null}
+
+      {archivedGoals.length > 0 ? (
+        <ArchivedGoalsCard goals={archivedGoals} />
       ) : null}
 
       <HistoryStrip period={period} history={history} today={today} />

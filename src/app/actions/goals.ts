@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/db/client";
-import { goals, goalProgress, goalChecklist, journalTasks, journalEntries } from "@/db/schema";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { goals, goalProgress, goalChecklist, habits, journalTasks, journalEntries } from "@/db/schema";
+import { and, asc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import {
@@ -687,14 +687,56 @@ export async function deleteGoal(id: string): Promise<void> {
 
 export async function archiveGoal(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.update(goals).set({ archivedAt: new Date(), status: "archived" }).where(eq(goals.id, id));
+  const goal = await findGoalById(id);
+  if (!goal) throw new Error("Goal not found");
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(goals)
+      .set({ archivedAt: now, status: "archived" })
+      .where(eq(goals.id, id));
+    // Bi-directional: if habit-linked, archive the habit too (which will in
+    // turn cascade to any sibling goals via archiveHabit's own logic — but
+    // we're inside a transaction, so do the habit update directly here).
+    if (goal.habitId) {
+      await tx
+        .update(habits)
+        .set({ archivedAt: now })
+        .where(and(eq(habits.id, goal.habitId), isNull(habits.archivedAt)));
+      // Archive every other active goal linked to the same habit.
+      await tx
+        .update(goals)
+        .set({ archivedAt: now, status: "archived" })
+        .where(and(eq(goals.habitId, goal.habitId), isNull(goals.archivedAt)));
+    }
+  });
   revalidateGoals();
+  revalidatePath("/habits", "layout");
 }
 
 export async function unarchiveGoal(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.update(goals).set({ archivedAt: null, status: "active" }).where(eq(goals.id, id));
+  const goal = await findGoalById(id);
+  if (!goal) throw new Error("Goal not found");
+  await db.transaction(async (tx) => {
+    await tx
+      .update(goals)
+      .set({ archivedAt: null, status: "active" })
+      .where(eq(goals.id, id));
+    if (goal.habitId) {
+      await tx
+        .update(habits)
+        .set({ archivedAt: null })
+        .where(and(eq(habits.id, goal.habitId), isNotNull(habits.archivedAt)));
+      // Restore every other archived goal linked to the same habit.
+      await tx
+        .update(goals)
+        .set({ archivedAt: null, status: "active" })
+        .where(and(eq(goals.habitId, goal.habitId), isNotNull(goals.archivedAt)));
+    }
+  });
   revalidateGoals();
+  revalidatePath("/habits", "layout");
 }
 
 // ---------- Number goal progress ----------

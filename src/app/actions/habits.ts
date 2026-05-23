@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/db/client";
-import { habits, habitLogs, habitValueLogs, pomodoroCategories } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { habits, habitLogs, habitValueLogs, pomodoroCategories, goals } from "@/db/schema";
+import { and, eq, isNull, isNotNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { isValidDateString, todayLocal } from "@/lib/dates";
@@ -188,13 +188,30 @@ export async function reorderHabits(orderedIds: string[]): Promise<void> {
 }
 
 export async function archiveHabit(id: string): Promise<void> {
-  await db.update(habits).set({ archivedAt: new Date() }).where(eq(habits.id, id));
-  revalidatePath("/habits");
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx.update(habits).set({ archivedAt: now }).where(eq(habits.id, id));
+    // Cascade: archive every active goal linked to this habit.
+    await tx
+      .update(goals)
+      .set({ archivedAt: now, status: "archived" })
+      .where(and(eq(goals.habitId, id), isNull(goals.archivedAt)));
+  });
+  revalidatePath("/habits", "layout");
+  revalidatePath("/goals", "layout");
 }
 
 export async function unarchiveHabit(id: string): Promise<void> {
-  await db.update(habits).set({ archivedAt: null }).where(eq(habits.id, id));
-  revalidatePath("/habits");
+  await db.transaction(async (tx) => {
+    await tx.update(habits).set({ archivedAt: null }).where(eq(habits.id, id));
+    // Cascade: restore every archived goal linked to this habit.
+    await tx
+      .update(goals)
+      .set({ archivedAt: null, status: "active" })
+      .where(and(eq(goals.habitId, id), isNotNull(goals.archivedAt)));
+  });
+  revalidatePath("/habits", "layout");
+  revalidatePath("/goals", "layout");
 }
 
 /**

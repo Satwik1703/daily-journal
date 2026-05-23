@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Archive, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deleteGoalCascade } from "@/app/actions/goals";
+import { archiveGoal, deleteGoalCascade, unarchiveGoal } from "@/app/actions/goals";
 import { GoalFormDialog, type GoalEditable } from "./goal-form-dialog";
 import type { CategoryOption, HabitOption } from "./add-goal-button";
 import type { GoalWithDerived } from "@/db/queries/goals";
@@ -82,6 +82,32 @@ export function GoalActionsMenu({
           <DropdownMenuItem onClick={() => setEditOpen(true)}>
             <Pencil />
             Edit goal
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              const isArchived = goal.archivedAt != null;
+              startTransition(async () => {
+                try {
+                  if (isArchived) {
+                    await unarchiveGoal(goal.id);
+                    toast.success(
+                      goal.habitId ? "Restored goal + linked habit" : "Restored",
+                    );
+                  } else {
+                    await archiveGoal(goal.id);
+                    toast.success(
+                      goal.habitId ? "Archived goal + linked habit" : "Archived",
+                    );
+                  }
+                  router.refresh();
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Failed");
+                }
+              });
+            }}
+          >
+            {goal.archivedAt ? <RotateCcw /> : <Archive />}
+            {goal.archivedAt ? "Unarchive" : "Archive"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

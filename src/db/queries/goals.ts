@@ -8,7 +8,7 @@ import {
   habitValueLogs,
   pomodoroSessions,
 } from "@/db/schema";
-import { and, asc, between, eq, inArray, isNull, sum, count } from "drizzle-orm";
+import { and, asc, between, eq, inArray, isNotNull, isNull, sum, count } from "drizzle-orm";
 import {
   periodRangeFor,
   shiftPeriodKey,
@@ -395,6 +395,28 @@ export async function getChildrenOfGoal(
     currentValue: values.get(r.id) ?? 0,
     checklist: r.type === "milestone" ? checklists.get(r.id) ?? [] : undefined,
   }));
+}
+
+/**
+ * Archived goals for a period (no derived values). Used by the
+ * "Show archived" toggle on /goals so a user can unarchive after
+ * having archived something.
+ */
+export async function getArchivedGoalsForPeriod(
+  period: GoalPeriod,
+  periodKey: string,
+): Promise<GoalRow[]> {
+  return db
+    .select()
+    .from(goals)
+    .where(
+      and(
+        eq(goals.period, period),
+        eq(goals.periodKey, periodKey),
+        isNotNull(goals.archivedAt),
+      ),
+    )
+    .orderBy(asc(goals.position), asc(goals.createdAt));
 }
 
 /** Find a single goal (any period) by id. Useful for action validation. */

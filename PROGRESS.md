@@ -928,6 +928,110 @@ Lifted `GroupBreak` out of `journal-form.tsx` into `src/components/ui/group-brea
 
 ---
 
+## ✅ Phase 7B — PWA shortcuts, locked-phone notify, drag-reorder, goals edit/delete
+
+Five-slice bundle on 2026-05-23. Plan at `C:\Users\Admin\.claude\plans\okay-lets-do-these-zippy-lake.md`.
+
+### Shipped
+
+1. **Manifest shortcuts (Android).** `src/app/manifest.ts` is now an async, `force-dynamic` route that fetches the top 4 active pomo categories at request time and emits one shortcut per category — URL `/pomodoro?autostart=1&categoryId={id}`. Long-press the installed PWA icon on Android Chrome shows them. iOS Safari ignores manifest shortcuts; graceful degrade.
+2. **`?autostart=1` deep-link.** `src/app/pomodoro/page.tsx` now preserves `window.location.search` across the `/pomodoro → /pomodoro/{today}` redirect. `[date]/page.tsx` accepts `autostart` searchParam and forwards as `initialAutostart` prop. `timer-panel.tsx`'s mount effect, when `initialAutostart && isToday && phase === "idle"`, calls `primeAudio()` + the existing start flow with the resolved category/duration + cleans the URL via `router.replace(pathname)` so a refresh doesn't relaunch.
+3. **Notification Triggers API (locked-phone alert, Chromium Android).** New `scheduleCompletionNotification(endsAt, label)` + `cancelCompletionNotification()` helpers in `timer-panel.tsx`. On Start / Resume / mount-resume-running we ask `Notification.permission` (default→prompt, sticky) and, if granted + `TimestampTrigger` exists, schedule `reg.showNotification("Pomodoro complete", { showTrigger: new TimestampTrigger(endsAt), vibrate: [200,100,200,100,400], icon, badge, tag: "pomo-completion" })`. Pause / Stop / Discard / Save-partial / in-foreground completion all call `cancelCompletionNotification()`. iOS/Safari silently no-op (no Triggers support); in-app `playPomodoroSound()` still fires if the tab is alive. Both layers run independently. `public/sw.js` gained a `notificationclick` handler that focuses an existing pomodoro client or opens `/pomodoro`.
+4. **Category chip wrap.** `src/app/pomodoro/[date]/_components/category-picker.tsx` outer wrapper went from `-mx-1 w-full max-w-full min-w-0 overflow-x-auto pb-1` to `w-full`; inner from `flex w-max gap-1.5 px-1` to `flex flex-wrap gap-1.5`. Affects timer panel + manual entry dialog (same component).
+5. **Drag-reorder for habits.** New `reorderHabits(orderedIds)` action in `src/app/actions/habits.ts`. `src/app/habits/_components/habit-list.tsx` rewrapped in `DndContext` + `SortableContext` + `verticalListSortingStrategy`. Grip handles on every active row via `useSortable({ id })`. Archived list stays static.
+6. **Drag-reorder for pomo categories.** Mirrored the same DndKit pattern into `src/app/settings/_components/pomodoro-categories-manager.tsx` (the `reorderCategories` action already existed from earlier).
+7. **Goal edit (cross-level cascade) + delete (current+future, freeze past).** New actions in `src/app/actions/goals.ts`:
+   - `updateGoalCascade({ id, ...editable fields })`: walks `parentId` to root, BFS down to every descendant. For non-target fields (title, emoji, color, unit, habitId, pomoCategoryId, pomoMetric, pinned), copies to every current+future node. For `targetValue`, treats the source goal's level as the truth: sets that level's current+future to the new value, then recursively (a) sums ancestor targets bottom-up, (b) redistributes downward to descendants via `autoSplitTargets` after subtracting past children's frozen targets. Past nodes untouched. Single `db.transaction`.
+   - `deleteGoalCascade(id)`: same tree walk; deletes every node whose period range ends today-or-later. Past instances stay (history). FK cascade handles `goal_progress` + `goal_checklist`.
+   - `GoalFormDialog` now dual-mode (`mode: "create" | "edit"` via optional `goal` prop). In edit mode the `type` radio is locked (data-model invariant), reverse-cascade + autoSplit sections hidden, title flips to "Edit goal", submit to "Save changes", action call goes through `updateGoalCascade`.
+   - New `goal-actions-menu.tsx` component renders a kebab `MoreHorizontal` button next to the existing pin button in the floating top-right block. Items: Edit (opens the dual-mode dialog) and Delete (confirm dialog → `deleteGoalCascade`). Past instances stay copy is in the confirm.
+8. **PWA shell bumped `habit-log-v8 → habit-log-v9`** in `public/sw.js`. SHELL unchanged.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 18 expected `react-hooks/set-state-in-effect` warnings (14 pre-existing + 4 new from dnd-kit managers + dialog state-sync; same intentional exemption pattern).
+- `npm run build` clean — 18 routes; `/manifest.webmanifest` flipped ƒ (dynamic).
+- Local probes: `/manifest.webmanifest` returns JSON with 4 shortcuts populated from live category IDs; `/pomodoro?autostart=1&categoryId=<id>` redirects + auto-starts the timer + cleans URL; chips wrap on narrow viewport; grip handles persist on refresh; goal edit cascades target across week/month/year; delete drops current+future only.
+
+### Deploy (this slice)
+
+1. Commit + push.
+2. No schema migration this slice.
+3. `vercel --prod --yes`.
+4. PWA: phones pick up `habit-log-v9` shell + new SW with `notificationclick` handler on next activation.
+5. On Android: long-press installed PWA icon → confirm category shortcuts.
+6. Lock-phone test: start a 30-min pomo, lock immediately, wait 30 min → OS notification fires with vibrate. Pause mid-session → notification cancelled.
+
+---
+
+## ✅ Phase 7C — goal archive + bi-directional habit↔goal sync + Protein/Hand grip seed
+
+Same-day continuation of 7B (2026-05-23). User-driven follow-ups.
+
+### Shipped
+
+1. **Goal archive UI in the action menu.** `goal-actions-menu.tsx` gained an Archive / Unarchive entry between Edit and Delete. Toggles based on `goal.archivedAt`. Item icon flips `Archive ↔ RotateCcw`. Calls existing `archiveGoal` / `unarchiveGoal` actions.
+2. **Bi-directional habit ↔ goal archive sync.** Updated `src/app/actions/habits.ts`:
+   - `archiveHabit(id)` now runs in a transaction that also archives every active goal where `goal.habitId = id` (sets `archivedAt + status = 'archived'`).
+   - `unarchiveHabit(id)` mirror-restores every archived goal linked to the habit.
+   - Revalidates `/habits` AND `/goals` layouts.
+
+   And `src/app/actions/goals.ts`:
+   - `archiveGoal(id)` loads the goal; if habit-linked, archives the habit + every other active goal sharing that `habitId` (same transaction).
+   - `unarchiveGoal(id)` symmetric — restores habit + sibling archived goals.
+   - The same logic handles the "user archives one of many cascade-children goals" case by hitting every sibling sharing `habitId` (i.e. the whole year/month/week tree for that habit).
+3. **Archived goals viewer.** New `src/db/queries/goals.ts::getArchivedGoalsForPeriod(period, periodKey)` returns archived rows (no derived values). The goals page fetches it in parallel and renders a new collapsible `ArchivedGoalsCard` (`src/app/goals/[period]/[anchor]/_components/archived-goals-card.tsx`) at the bottom — chevron toggle, each row shows emoji + title + Restore button + Delete-forever (uses `deleteGoalCascade`).
+4. **Two new habits with full-year cascading goals.** `scripts/seed-protein-handgrip.mjs` is an **idempotent, additive** seed (skips by habit name if present):
+   - **🥩 Protein** — number-tracking, dailyTarget 90, unit "grams".
+   - **✊ Hand grip** — number-tracking, dailyTarget 100, unit "reps".
+   - Both: habit-linked goal at 5 days/week, full-year cascade from the ISO week containing tomorrow (2026-W21) through end of 2026 (2026-W53). 33 weekly clones + 8 monthly parents + 1 yearly per habit. Total 86 goal rows + 2 habit rows.
+   - Date math reimplemented in the script (Monday-anchored ISO week → Thursday → month) so it doesn't depend on the TS source.
+   - Usage: `node scripts/seed-protein-handgrip.mjs` (local) or `node scripts/seed-protein-handgrip.mjs prod` (Turso, env required).
+
+### Files touched
+
+- `src/app/actions/{habits,goals}.ts` (archive transactions)
+- `src/app/goals/[period]/[anchor]/_components/{goal-actions-menu,archived-goals-card}.tsx`
+- `src/app/goals/[period]/[anchor]/page.tsx` (fetch + render archived card)
+- `src/db/queries/goals.ts` (`getArchivedGoalsForPeriod` + `isNotNull` import)
+- `scripts/seed-protein-handgrip.mjs` (new)
+
+### Verification
+
+- Local seed produced 16 habits (was 14) + 2 yearly + 16 monthly + 66 weekly new goal rows.
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 18 warnings (no new ones; `archived-goals-card.tsx` doesn't add a state-sync effect).
+- `npm run build` clean — same 18 routes.
+- Probes: `/habits/{today}`, `/goals/week/2026-W21`, `/goals/week/2026-W30`, `/goals/month/2026-06`, `/goals/year/2026`, `/settings` all 200.
+
+### Deploy
+
+1. Commit + push (covers 7C code + script + PROGRESS.md).
+2. No schema migration.
+3. Prod additive seed:
+   ```powershell
+   Get-Content .env.production.local | ForEach-Object {
+     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)\s*$') {
+       Set-Item -Path "Env:\$($matches[1])" -Value $matches[2].Trim('"')
+     }
+   }
+   node scripts/seed-protein-handgrip.mjs prod
+   ```
+4. `vercel --prod --yes`.
+5. PWA stays on `habit-log-v9` (no SW changes in 7C). Reuses the activation triggered by the 7B deploy if both ship together.
+
+### Things deferred to 7D+
+
+- Restoring archive on Habit Manage UI to show the same bi-directional toast text.
+- Confirm dialog before archiving a goal that has progress logs (currently silent).
+- Reorder for journal tasks (`position` column exists; same DndKit pattern would apply).
+- Reflection summary view across periods; "regenerate cascade" toggle; per-day Walk target overrides; drop legacy `cadence` + `targetPerWeek` columns from habits.
+
+**Resume here for next session:** 7C ready to deploy alongside 7B. Awaiting next direction.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
