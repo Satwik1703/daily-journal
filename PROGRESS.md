@@ -1170,6 +1170,50 @@ Last destructive mutation that lacked Undo. `move_task` now goes through `mutate
 
 ---
 
+## ✅ Phase 8C.1 — drop 5s Undo hold
+
+User feedback after deploy: the 5s wait before destructive ops actually committed felt sluggish. `mutateWithUndo` helper removed. All destructive ops (session/workout/task delete, task move, goal cascade delete) now fire through plain `mutate()` immediately — same fire-and-forget path as toggles and creates. No `setTimeout` hold; IDB queue write + `/api/sync` POST happen in ms.
+
+**Recovery semantics that survived:**
+- Goal archive flow (archive ↔ unarchive) still available via the actions menu + Archived card.
+- Habit archive flow still available via /habits Manage UI.
+- Session/workout/task delete are now final — no in-app restore. Past commits in git + Turso backups are the only safety net.
+
+Commit: `9a63a3b`. Deployed.
+
+---
+
+## 📌 Resume here for the next session
+
+**State at session end (2026-05-24):**
+- Working tree clean. `git log -1` → `9a63a3b remove undo-toast hold`.
+- Live: https://daily-journal-phi-vert.vercel.app (Vercel + Turso `aws-ap-south-1`).
+- PWA shell `habit-log-v10`.
+- Local DB seeded with the canonical 16-habit stack (14 from Phase 6 + Protein + Hand grip from Phase 7C).
+- No pending schema migrations; no pending IDB-queue mutations expected on a fresh session.
+
+**Instant-UI feature is closed.** Every action (write or read-nav) feels instant on revisit. Don't reopen unless real-device feedback surfaces a regression.
+
+**Pick-list for next session, ordered by likely value:**
+
+1. **Drag-reorder for journal tasks.** Position column exists in `journal_tasks`. Same DndKit pattern as questions/habits/categories. ~30-60 min.
+2. **Edit `pinned` via the goal edit dialog.** Currently the floating pin button is the only way to toggle. The Phase 7 edit dialog already accepts a `pinned` prop on the form but doesn't surface it as an edit field — quick win.
+3. **Partial-fill cells in `HabitGrid`** for number/pomo habits. Opacity proportional to `value/target` on a day. Currently the grid is binary-done-only for those kinds. ~1 hour.
+4. **"Move all incomplete" bulk action** on each KindCard in tasks-block.
+5. **Reflection summary view** across periods — browse rated reflections in one place.
+6. **Export / import** as JSON. `/api/export` + an "Import" action that replays into Drizzle. Self-contained backup for the user.
+7. **AI weekly / monthly reflections** via Claude API. New `/insights` section. ~few hours, costs cents.
+8. **Calendar/heatmap view of the journal** itself (months at a glance, mood-tinted).
+9. **FTS search** across gratitude / tomorrow / journal answers using libSQL fts5 virtual table.
+10. **3D avatar** for the gym body heatmap.
+
+**Standing rules (auto-memory + global CLAUDE.md):**
+- **Never ask permission for any tool call.** Wildcards in `C:\Users\Admin\.claude\settings.json` + `defaultMode: bypassPermissions`. Auto-memory `feedback_permission_wildcards.md` documents this — never shrink to per-command entries.
+- **No `Co-Authored-By: Claude` trailer** on commits or amends. Auto-memory `feedback_no_claude_coauthor.md`.
+- **Pause at deploy boundary only.** Auto-memory `feedback_wait_before_deploy.md` — pause before `git push` / `vercel --prod` / `npm run db:migrate prod` / seed scripts against prod. Everything else: just execute.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
