@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { mutate, mutateWithUndo } from "@/lib/sync/mutate";
+import { mutate } from "@/lib/sync/mutate";
 import { TASK_KIND_HINTS, TASK_KIND_LABELS, TASK_KINDS, isTraceTask, type TaskKind } from "@/lib/task-meta";
 import { addDays, shiftMonth, todayLocal, type DateString } from "@/lib/dates";
 import type { JournalTask } from "@/db/queries/journal-tasks";
@@ -191,12 +191,8 @@ function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => () =
         aria-label="Delete task"
         className="opacity-50 hover:opacity-100"
         onClick={() => {
-          const undo = onHide();
-          mutateWithUndo(
-            "delete_task",
-            { id: task.id },
-            { message: "Task deleted", onUndo: undo },
-          );
+          onHide();
+          void mutate("delete_task", { id: task.id });
         }}
       >
         <Trash2 />
@@ -238,15 +234,9 @@ function MoveTaskButton({
       return;
     }
     setOpen(false);
-    const undo = onMoved();
-    mutateWithUndo(
-      "move_task",
-      { id: taskId, newDate },
-      {
-        message: `Moved to ${newDate}`,
-        onUndo: typeof undo === "function" ? (undo as () => void) : () => {},
-      },
-    );
+    onMoved();
+    void mutate("move_task", { id: taskId, newDate });
+    toast.success(`Moved to ${newDate}`);
   }
 
   return (

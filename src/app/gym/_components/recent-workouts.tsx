@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { mutateWithUndo } from "@/lib/sync/mutate";
+import { mutate } from "@/lib/sync/mutate";
+import { toast } from "sonner";
 import {
   INTENSITY_LABEL,
   MUSCLE_LABELS,
@@ -43,19 +44,8 @@ export function RecentWorkouts({ workouts }: { workouts: WorkoutWithMuscles[] })
                   aria-label="Delete workout"
                   onClick={() => {
                     setHiddenIds((s) => new Set(s).add(w.id));
-                    mutateWithUndo(
-                      "delete_workout",
-                      { id: w.id },
-                      {
-                        message: "Workout deleted",
-                        onUndo: () =>
-                          setHiddenIds((s) => {
-                            const next = new Set(s);
-                            next.delete(w.id);
-                            return next;
-                          }),
-                      },
-                    );
+                    void mutate("delete_workout", { id: w.id });
+                    toast.success("Workout deleted");
                   }}
                 >
                   <Trash2 />

@@ -1,6 +1,5 @@
 "use client";
 
-import { toast } from "sonner";
 import { enqueue, markDone, markFailed, markInFlight } from "./queue";
 import { invalidateCache } from "./cache";
 
@@ -153,42 +152,6 @@ export async function flushQueue(): Promise<{ ok: number; failed: number }> {
   }
   broadcast(STATUS_CHANNEL, { type: "flushed", ok, failed });
   return { ok, failed };
-}
-
-/**
- * Apply an optimistic mutation but defer the actual queue write for a few
- * seconds, showing a sonner toast with an "Undo" button. If the user clicks
- * Undo before the timeout, the optimistic patch is reverted via `onUndo` and
- * no server mutation is queued. Otherwise the mutation enqueues normally.
- *
- * The caller is responsible for:
- *   1. Applying the optimistic patch before calling this.
- *   2. Implementing `onUndo` to revert that patch.
- */
-export function mutateWithUndo(
-  kind: string,
-  args: unknown,
-  opts: {
-    message: string;
-    onUndo: () => void;
-    timeoutMs?: number;
-  },
-): void {
-  const timeout = opts.timeoutMs ?? 5000;
-  let undone = false;
-  toast(opts.message, {
-    duration: timeout,
-    action: {
-      label: "Undo",
-      onClick: () => {
-        undone = true;
-        opts.onUndo();
-      },
-    },
-  });
-  window.setTimeout(() => {
-    if (!undone) void mutate(kind, args);
-  }, timeout);
 }
 
 export async function retryOne(id: string): Promise<boolean> {

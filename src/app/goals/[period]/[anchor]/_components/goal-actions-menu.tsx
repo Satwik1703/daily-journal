@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { mutate, mutateWithUndo } from "@/lib/sync/mutate";
+import { mutate } from "@/lib/sync/mutate";
 import { GoalFormDialog, type GoalEditable } from "./goal-form-dialog";
 import type { CategoryOption, HabitOption } from "./add-goal-button";
 import type { GoalWithDerived } from "@/db/queries/goals";
@@ -133,16 +133,8 @@ export function GoalActionsMenu({
               variant="destructive"
               onClick={() => {
                 setConfirmOpen(false);
-                mutateWithUndo(
-                  "delete_goal_cascade",
-                  { id: goal.id },
-                  {
-                    message: "Goal deleted (current + future)",
-                    onUndo: () => {
-                      /* no local optimistic to revert; goal stays visible until nav refreshes */
-                    },
-                  },
-                );
+                void mutate("delete_goal_cascade", { id: goal.id });
+                toast.success("Goal deleted (current + future)");
               }}
             >
               Delete

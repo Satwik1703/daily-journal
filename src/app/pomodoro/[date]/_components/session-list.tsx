@@ -14,7 +14,8 @@ import {
 import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/pomodoro-meta";
 import type { PomodoroDay } from "@/db/queries/pomodoro";
-import { mutateWithUndo } from "@/lib/sync/mutate";
+import { mutate } from "@/lib/sync/mutate";
+import { toast } from "sonner";
 
 type Session = PomodoroDay["sessions"][number];
 
@@ -31,19 +32,8 @@ export function SessionList({ sessions }: { sessions: Session[] }) {
       return next;
     });
     setDeleteTarget(null);
-    mutateWithUndo(
-      "delete_session",
-      { id },
-      {
-        message: "Session deleted",
-        onUndo: () =>
-          setHiddenIds((s) => {
-            const next = new Set(s);
-            next.delete(id);
-            return next;
-          }),
-      },
-    );
+    void mutate("delete_session", { id });
+    toast.success("Session deleted");
   }
 
   const visible = sessions.filter((s) => !hiddenIds.has(s.id));
