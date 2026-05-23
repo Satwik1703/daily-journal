@@ -1,7 +1,7 @@
 "use client";
 
 import { customAlphabet } from "nanoid";
-import { useTransition, useState } from "react";
+import { useEffect, useTransition, useState } from "react";
 import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
 import type { Split, Workout } from "@/lib/gym-meta";
@@ -25,6 +25,15 @@ export function SplitPicker({
     splitId: workout?.splitId ?? null,
     workoutId: workout?.id ?? null,
   });
+
+  // Sync to prop changes: SplitSuggestionBanner accept (and page refetch)
+  // mutate the workout externally — picker chip must reflect that.
+  useEffect(() => {
+    setOptimistic({
+      splitId: workout?.splitId ?? null,
+      workoutId: workout?.id ?? null,
+    });
+  }, [workout?.splitId, workout?.id]);
 
   function pick(splitId: string | null) {
     startTransition(() => {

@@ -58,6 +58,15 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("gym:*");
   }
   if (
+    kind === "log_body_weight" ||
+    kind === "update_body_weight" ||
+    kind === "delete_body_weight"
+  ) {
+    if (a.date) keys.push(`gym:${a.date}`);
+    keys.push("gym:*");
+    keys.push("gym-insights:*");
+  }
+  if (
     kind === "create_split" ||
     kind === "update_split" ||
     kind === "archive_split" ||

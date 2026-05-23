@@ -55,6 +55,11 @@ import {
   saveReflection,
 } from "@/app/actions/goals";
 import {
+  logBodyWeight,
+  updateBodyWeight,
+  deleteBodyWeight,
+} from "@/app/actions/body-weight";
+import {
   createSplit,
   updateSplit,
   archiveSplit,
@@ -163,6 +168,11 @@ export const DISPATCH: Record<string, AnyAction> = {
   log_set: logSet,
   update_set: updateSet,
   delete_set: (args: { id: string }) => deleteSet(args.id),
+
+  // body weight (Phase 9.2)
+  log_body_weight: logBodyWeight,
+  update_body_weight: updateBodyWeight,
+  delete_body_weight: (args: { id: string }) => deleteBodyWeight(args.id),
 };
 
 export type MutationKind = keyof typeof DISPATCH;

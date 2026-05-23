@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
-import { isValidDateString } from "@/lib/dates";
+import { addDays, isValidDateString } from "@/lib/dates";
 import {
   getAllSplitsWithExercises,
   getWorkoutForDate,
   getLastSetPerExerciseBefore,
+  getLastSessionSetsPerExercise,
+  getAllWorkoutsLight,
 } from "@/db/queries/gym";
+import {
+  getLatestBodyWeightAsOf,
+  getBodyWeightForRange,
+} from "@/db/queries/body-weight";
+import {
+  computeProgressionSuggestion,
+  suggestNextSplit,
+  type ProgressionSuggestion,
+} from "@/lib/gym-meta";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +28,14 @@ export async function GET(
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const [library, todayData] = await Promise.all([
+  const [library, todayData, latestBW, last7BW, allWorkouts] = await Promise.all([
     getAllSplitsWithExercises(),
     getWorkoutForDate(date),
+    getLatestBodyWeightAsOf(date),
+    getBodyWeightForRange(addDays(date, -6), date),
+    getAllWorkoutsLight(),
   ]);
 
-  // Prefill — last set per exercise BEFORE today, scoped to:
-  //   1. exercises in current split (if a split is set)
-  //   2. exercises already used in today's workout (so off-split adds also prefill)
   const splitExerciseIds = todayData.workout?.splitId
     ? library.joins
         .filter((j) => j.splitId === todayData.workout!.splitId)
@@ -32,7 +43,34 @@ export async function GET(
     : [];
   const usedTodayIds = Array.from(new Set(todayData.sets.map((s) => s.exerciseId)));
   const prefillIds = Array.from(new Set([...splitExerciseIds, ...usedTodayIds]));
-  const prefill = await getLastSetPerExerciseBefore(date, prefillIds);
+
+  // Prefill (single most recent set) + last-session (all sets that day) per ex.
+  const [prefill, lastSession] = await Promise.all([
+    getLastSetPerExerciseBefore(date, prefillIds),
+    getLastSessionSetsPerExercise(date, prefillIds),
+  ]);
+
+  // Progression suggestion per exercise.
+  const progressionSuggestions: Record<string, ProgressionSuggestion> = {};
+  for (const id of prefillIds) {
+    const session = lastSession[id];
+    progressionSuggestions[id] = session
+      ? computeProgressionSuggestion(session.sets)
+      : { kind: "none" };
+  }
+
+  // Split suggestion (only when no split picked for today).
+  let splitSuggestion: { splitId: string; splitName: string; daysSince: number } | null = null;
+  if (!todayData.workout || todayData.workout.splitId == null) {
+    const recent = allWorkouts.filter(
+      (w) => w.date >= addDays(date, -89) && w.date <= date,
+    );
+    const s = suggestNextSplit(library.splits, recent, date, 3);
+    if (s) {
+      const split = library.splits.find((sp) => sp.id === s.splitId);
+      if (split) splitSuggestion = { ...s, splitName: split.name };
+    }
+  }
 
   return NextResponse.json({
     date,
@@ -42,5 +80,11 @@ export async function GET(
     exercises: library.exercises,
     joins: library.joins,
     prefill,
+    progressionSuggestions,
+    splitSuggestion,
+    bodyWeight: {
+      latest: latestBW,
+      last7: last7BW,
+    },
   });
 }

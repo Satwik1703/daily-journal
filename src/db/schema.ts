@@ -219,6 +219,21 @@ export const workoutSets = sqliteTable(
   ],
 );
 
+// Phase 9.2: optional body weight tracking for recomp visualization.
+export const bodyWeightLogs = sqliteTable(
+  "body_weight_logs",
+  {
+    id: text("id").primaryKey(),
+    date: text("date").notNull(),
+    weightKg: real("weight_kg").notNull(),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("body_weight_logs_date").on(t.date)],
+);
+
 // ---------- Pomodoro ----------
 
 export const pomodoroCategories = sqliteTable("pomodoro_categories", {

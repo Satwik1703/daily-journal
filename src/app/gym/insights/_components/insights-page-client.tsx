@@ -20,6 +20,9 @@ import { MUSCLE_GROUPS, MUSCLE_LABELS, type MuscleGroup } from "@/lib/muscle-gro
 import { Body3DDynamic } from "@/components/body-3d";
 import { VolumeTrendChart } from "./volume-trend-chart";
 import { WeekdayFrequencyChart } from "./weekday-frequency-chart";
+import { BodyWeightChart } from "./body-weight-chart";
+import { SplitStreaksCard } from "./split-streaks-card";
+import { CompareWeeksCard } from "./compare-weeks-card";
 
 type InsightsData = {
   range: GymRange;
@@ -44,6 +47,38 @@ type InsightsData = {
     kind: "weight" | "1rm";
   }[];
   hoursSinceLastHitByMuscle: Partial<Record<MuscleGroup, number | null>>;
+  weekCompare: {
+    thisWeek: {
+      weekKey: string;
+      start: string;
+      end: string;
+      workoutCount: number;
+      totalVolume: number;
+      totalSets: number;
+      topExercises: { exerciseId: string; name: string; topWeightKg: number; topReps: number }[];
+      setsPerMuscle: Record<MuscleGroup, number>;
+    };
+    lastWeek: {
+      weekKey: string;
+      start: string;
+      end: string;
+      workoutCount: number;
+      totalVolume: number;
+      totalSets: number;
+      topExercises: { exerciseId: string; name: string; topWeightKg: number; topReps: number }[];
+      setsPerMuscle: Record<MuscleGroup, number>;
+    };
+  };
+  splitStreaks: {
+    splitId: string;
+    splitName: string;
+    emoji: string | null;
+    color: string;
+    current: number;
+    longest: number;
+  }[];
+  bodyWeightSeries: { date: string; weightKg: number }[];
+  bodyWeightDelta: { startKg: number; endKg: number; deltaKg: number } | null;
 };
 
 export function GymInsightsPageClient() {
@@ -51,7 +86,7 @@ export function GymInsightsPageClient() {
   const [mode, setMode] = useState<"volume" | "recovery">("volume");
 
   const data = useCachedPage<InsightsData | null>(
-    `gym-insights:${range}`,
+    `gym-insights:v2:${range}`,
     null,
     async () => {
       const res = await fetch(`/api/page/gym/insights/${range}`, { cache: "no-store" });
@@ -149,6 +184,17 @@ function Loaded({
         )}
       </section>
 
+      {data.weekCompare ? (
+        <section className="space-y-3 rounded-xl border border-border bg-card/30 p-3">
+          <h2 className="font-serif text-base font-normal">This week vs last</h2>
+          <CompareWeeksCard
+            thisWeek={data.weekCompare.thisWeek}
+            lastWeek={data.weekCompare.lastWeek}
+            exercises={data.exercises}
+          />
+        </section>
+      ) : null}
+
       <section className="space-y-3 rounded-xl border border-border bg-card/30 p-3">
         <h2 className="font-serif text-base font-normal">Volume trend</h2>
         <VolumeTrendChart
@@ -163,6 +209,19 @@ function Loaded({
       <section className="space-y-3 rounded-xl border border-border bg-card/30 p-3">
         <h2 className="font-serif text-base font-normal">Frequency by weekday</h2>
         <WeekdayFrequencyChart workoutsPerDay={data.workoutsPerDay} />
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card/30 p-3">
+        <h2 className="font-serif text-base font-normal">Split streaks</h2>
+        <SplitStreaksCard streaks={data.splitStreaks ?? []} />
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card/30 p-3">
+        <h2 className="font-serif text-base font-normal">Body weight</h2>
+        <BodyWeightChart
+          series={data.bodyWeightSeries ?? []}
+          delta={data.bodyWeightDelta ?? null}
+        />
       </section>
 
       <section className="space-y-2 rounded-xl border border-border bg-card/30 p-3">

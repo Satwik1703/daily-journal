@@ -17,7 +17,13 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
-import { addDays, todayLocal, type DateString } from "@/lib/dates";
+import {
+  addDays,
+  isoWeekKey,
+  periodRangeFor,
+  todayLocal,
+  type DateString,
+} from "@/lib/dates";
 import type { MuscleGroup } from "@/lib/muscle-groups";
 import {
   est1RM,
@@ -191,6 +197,189 @@ export async function getLastSetPerExerciseBefore(
   }
   return out;
 }
+
+// ---------- Last session per exercise (for progression suggestion) ----------
+
+/**
+ * Per exercise: the most recent workout where the exercise had sets, and all
+ * the sets from that single workout. Empty entry if never logged.
+ */
+export async function getLastSessionSetsPerExercise(
+  beforeDate: DateString,
+  exerciseIds: string[],
+): Promise<
+  Record<string, { date: DateString; sets: Pick<WorkoutSet, "reps" | "weightKg">[] }>
+> {
+  if (exerciseIds.length === 0) return {};
+  const wRows = await db
+    .select({ id: workouts.id, date: workouts.date })
+    .from(workouts)
+    .where(sql`${workouts.date} < ${beforeDate}`)
+    .orderBy(desc(workouts.date), desc(workouts.createdAt));
+  if (wRows.length === 0) return {};
+
+  const wIdToDate = new Map(wRows.map((r) => [r.id, r.date]));
+  const setRows = await db
+    .select({
+      workoutId: workoutSets.workoutId,
+      exerciseId: workoutSets.exerciseId,
+      reps: workoutSets.reps,
+      weightKg: workoutSets.weightKg,
+    })
+    .from(workoutSets)
+    .where(
+      and(
+        inArray(workoutSets.exerciseId, exerciseIds),
+        inArray(workoutSets.workoutId, wRows.map((r) => r.id)),
+      ),
+    );
+
+  // For each exercise pick the most recent date that had sets, take all sets
+  // from that date (could be multiple workouts on same date — combine).
+  const byExercise = new Map<
+    string,
+    { date: DateString; sets: { reps: number | null; weightKg: number | null }[] }
+  >();
+  // Group: exerciseId -> date -> sets[]
+  const buckets = new Map<string, Map<DateString, { reps: number | null; weightKg: number | null }[]>>();
+  for (const s of setRows) {
+    const d = wIdToDate.get(s.workoutId);
+    if (!d) continue;
+    let perEx = buckets.get(s.exerciseId);
+    if (!perEx) {
+      perEx = new Map();
+      buckets.set(s.exerciseId, perEx);
+    }
+    let arr = perEx.get(d);
+    if (!arr) {
+      arr = [];
+      perEx.set(d, arr);
+    }
+    arr.push({ reps: s.reps, weightKg: s.weightKg });
+  }
+  for (const [exerciseId, perEx] of buckets) {
+    const dates = Array.from(perEx.keys()).sort();
+    const latest = dates.at(-1)!;
+    byExercise.set(exerciseId, { date: latest, sets: perEx.get(latest)! });
+  }
+
+  const out: Record<string, { date: DateString; sets: Pick<WorkoutSet, "reps" | "weightKg">[] }> = {};
+  for (const [k, v] of byExercise) out[k] = v;
+  return out;
+}
+
+// ---------- All workouts for streak / suggestion (lightweight) ----------
+
+export async function getAllWorkoutsLight(): Promise<
+  { date: DateString; splitId: string | null }[]
+> {
+  return db
+    .select({ date: workouts.date, splitId: workouts.splitId })
+    .from(workouts)
+    .orderBy(asc(workouts.date));
+}
+
+// ---------- Compare this week vs last ----------
+
+export type WeekAgg = {
+  weekKey: string;
+  start: DateString;
+  end: DateString;
+  workoutCount: number;
+  totalVolume: number;
+  totalSets: number;
+  topExercises: { exerciseId: string; name: string; topWeightKg: number; topReps: number }[];
+  setsPerMuscle: Record<MuscleGroup, number>;
+};
+
+async function aggregateWeek(
+  weekKey: string,
+  exercisesById: Map<string, Exercise>,
+): Promise<WeekAgg> {
+  const { start, end } = periodRangeFor(weekKey, "week");
+  const wRows = await db
+    .select()
+    .from(workouts)
+    .where(between(workouts.date, start, end));
+  const workoutCount = wRows.length;
+  let totalVolume = 0;
+  let totalSets = 0;
+  const setsPerMuscle: Partial<Record<MuscleGroup, number>> = {};
+  const exTop = new Map<string, { topWeightKg: number; topReps: number }>();
+
+  if (wRows.length > 0) {
+    const setRows = await db
+      .select()
+      .from(workoutSets)
+      .where(inArray(workoutSets.workoutId, wRows.map((r) => r.id)));
+    for (const s of setRows.map(rowSet)) {
+      totalSets += 1;
+      totalVolume += setVolume(s);
+      const ex = exercisesById.get(s.exerciseId);
+      if (ex) {
+        for (const m of ex.muscleGroups) {
+          setsPerMuscle[m] = (setsPerMuscle[m] ?? 0) + 1;
+        }
+      }
+      if ((s.weightKg ?? 0) > 0 && (s.reps ?? 0) > 0) {
+        const cur = exTop.get(s.exerciseId);
+        if (!cur || (s.weightKg ?? 0) > cur.topWeightKg) {
+          exTop.set(s.exerciseId, { topWeightKg: s.weightKg!, topReps: s.reps! });
+        }
+      }
+    }
+  }
+
+  const topExercises = Array.from(exTop.entries())
+    .map(([exerciseId, v]) => ({
+      exerciseId,
+      name: exercisesById.get(exerciseId)?.name ?? "—",
+      topWeightKg: v.topWeightKg,
+      topReps: v.topReps,
+    }))
+    .sort((a, b) => b.topWeightKg - a.topWeightKg)
+    .slice(0, 5);
+
+  return {
+    weekKey,
+    start,
+    end,
+    workoutCount,
+    totalVolume,
+    totalSets,
+    topExercises,
+    setsPerMuscle: setsPerMuscle as Record<MuscleGroup, number>,
+  };
+}
+
+export async function getGymWeekCompare(): Promise<{ thisWeek: WeekAgg; lastWeek: WeekAgg }> {
+  const today = todayLocal();
+  const thisKey = isoWeekKey(today);
+  // Step back one week: use periodRangeFor previous week.
+  const thisStart = periodRangeFor(thisKey, "week").start;
+  const lastWeekDate = addDays(thisStart, -3); // any date inside last week
+  const lastKey = isoWeekKey(lastWeekDate);
+
+  const exRows = await db.select().from(exercises);
+  const exById = new Map(exRows.map((r) => [r.id, rowExercise(r)]));
+
+  const [thisWeek, lastWeek] = await Promise.all([
+    aggregateWeek(thisKey, exById),
+    aggregateWeek(lastKey, exById),
+  ]);
+  return { thisWeek, lastWeek };
+}
+
+// ---------- Split week streaks (computed against ALL workouts) ----------
+
+export type SplitStreakEntry = {
+  splitId: string;
+  splitName: string;
+  emoji: string | null;
+  color: string;
+  current: number;
+  longest: number;
+};
 
 // ---------- Month status for date stepper ----------
 

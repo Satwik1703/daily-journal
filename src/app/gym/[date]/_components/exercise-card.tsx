@@ -7,7 +7,12 @@ import { toast } from "sonner";
 import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
 import { MUSCLE_LABELS } from "@/lib/muscle-groups";
-import type { Exercise, WorkoutSet, SetPrefill } from "@/lib/gym-meta";
+import type {
+  Exercise,
+  WorkoutSet,
+  SetPrefill,
+  ProgressionSuggestion,
+} from "@/lib/gym-meta";
 import { SetRow } from "./set-row";
 
 const setIdGen = customAlphabet(
@@ -23,6 +28,7 @@ export function ExerciseCard({
   exercise,
   sets,
   prefill,
+  progression,
   onLocalSets,
   removable,
   onRemove,
@@ -32,6 +38,7 @@ export function ExerciseCard({
   exercise: Exercise;
   sets: SetWithFlags[];
   prefill: SetPrefill;
+  progression?: ProgressionSuggestion;
   onLocalSets: (next: SetWithFlags[]) => void;
   removable?: boolean;
   onRemove?: () => void;
@@ -128,6 +135,12 @@ export function ExerciseCard({
               ? `${sets.length} set${sets.length === 1 ? "" : "s"} done · ${subtitle}`
               : subtitle}
           </span>
+          {progression && progression.kind !== "none" ? (
+            <span className="truncate text-[11px] italic text-primary/80">
+              ↗ {progression.message}
+              {exercise.perHand ? " each" : ""}
+            </span>
+          ) : null}
           <span className="mt-0.5 flex flex-wrap gap-1">
             {exercise.muscleGroups.slice(0, 4).map((m) => (
               <span

@@ -14,6 +14,7 @@ import {
   sumSetsByMuscle,
   sortByPosition,
   type Exercise,
+  type ProgressionSuggestion,
   type Split,
   type SplitExercise,
   type Workout,
@@ -25,6 +26,8 @@ import { SplitPicker } from "./split-picker";
 import { ExerciseCard } from "./exercise-card";
 import { AddExerciseSheet } from "./add-exercise-sheet";
 import { WorkoutNotes } from "./workout-notes";
+import { BodyWeightCard } from "./body-weight-card";
+import { SplitSuggestionBanner } from "./split-suggestion-banner";
 import { Body3DDynamic } from "@/components/body-3d";
 
 const wid = customAlphabet(
@@ -40,11 +43,25 @@ type PageData = {
   exercises: Exercise[];
   joins: SplitExercise[];
   prefill: Record<string, SetPrefill>;
+  progressionSuggestions: Record<string, ProgressionSuggestion>;
+  splitSuggestion:
+    | { splitId: string; splitName: string; daysSince: number }
+    | null;
+  bodyWeight: {
+    latest: {
+      id: string;
+      date: string;
+      weightKg: number;
+      note: string | null;
+      createdAt: number;
+    } | null;
+    last7: { date: string; weightKg: number }[];
+  };
 };
 
 export function GymPageClient({ date }: { date: string }) {
   const data = useCachedPage<PageData | null>(
-    `gym:${date}`,
+    `gym:v2:${date}`,
     null,
     async () => {
       const res = await fetch(`/api/page/gym/${date}`, { cache: "no-store" });
@@ -173,6 +190,28 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
 
   return (
     <>
+      <BodyWeightCard
+        date={date}
+        latest={data.bodyWeight?.latest ?? null}
+        last7={data.bodyWeight?.last7 ?? []}
+      />
+
+      {data.splitSuggestion && splitId == null ? (
+        <SplitSuggestionBanner
+          date={date}
+          suggestion={data.splitSuggestion}
+          splits={data.splits}
+          workoutId={workoutId}
+          onAccept={(sid, wid) => {
+            setSplitId(sid);
+            setWorkoutId(wid);
+          }}
+        />
+      ) : null}
+
+      {/* progressionSuggestions safety: stale IDB cache may lack the key */}
+      {/* (consumed below in ExerciseCard via data.progressionSuggestions?.[ex.id]) */}
+
       <SplitPicker
         date={date}
         splits={data.splits}
@@ -218,6 +257,7 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
               exercise={ex}
               sets={setsByExercise.get(ex.id) ?? []}
               prefill={data.prefill[ex.id] ?? { reps: null, weightKg: null }}
+              progression={data.progressionSuggestions?.[ex.id]}
               onLocalSets={(next) =>
                 setSets((all) => {
                   const others = all.filter((s) => s.exerciseId !== ex.id);

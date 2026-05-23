@@ -213,6 +213,141 @@ export function isWeightPR(
   return candidate.weightKg > priorMax;
 }
 
+// ---------- Per-split weekly streak ----------
+
+import { isoWeekKey, addDays, daysBetween, parseDate, formatLocalYMD } from "./dates";
+
+/** Shift an ISO-week key by ±N weeks (Thursday-anchored). */
+function shiftIsoWeek(key: string, delta: number): string {
+  const m = key.match(/^(\d{4})-W(\d{2})$/);
+  if (!m) throw new Error(`Invalid week key: ${key}`);
+  const isoYear = Number(m[1]);
+  const weekNo = Number(m[2]);
+  const jan4 = new Date(isoYear, 0, 4);
+  const jan4IsoDay = jan4.getDay() === 0 ? 7 : jan4.getDay();
+  const week1Thu = new Date(isoYear, 0, 4 + (4 - jan4IsoDay));
+  const targetThu = new Date(week1Thu.getTime());
+  targetThu.setDate(targetThu.getDate() + (weekNo - 1 + delta) * 7);
+  return isoWeekKey(formatLocalYMD(targetThu));
+}
+
+/**
+ * Consecutive weeks (ISO 8601) where the given split was hit at least once.
+ * Current allows the current week missing if the previous week is present
+ * (mirrors the grace semantics in src/lib/streaks.ts).
+ */
+export function computeSplitWeekStreak(
+  splitId: string,
+  workouts: Pick<Workout, "date" | "splitId">[],
+  todayKey: string,
+): { current: number; longest: number } {
+  const weeks = new Set<string>();
+  for (const w of workouts) {
+    if (w.splitId === splitId) weeks.add(isoWeekKey(w.date));
+  }
+  if (weeks.size === 0) return { current: 0, longest: 0 };
+
+  // Longest: sort week keys chronologically, count consecutive runs.
+  const sorted = Array.from(weeks).sort();
+  let longest = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const k of sorted) {
+    if (prev !== null && shiftIsoWeek(prev, 1) === k) run += 1;
+    else run = 1;
+    if (run > longest) longest = run;
+    prev = k;
+  }
+
+  // Current: walk backward from todayKey. Grace = allow current week missing.
+  let cursor = todayKey;
+  if (!weeks.has(cursor)) {
+    cursor = shiftIsoWeek(cursor, -1);
+    if (!weeks.has(cursor)) return { current: 0, longest };
+  }
+  let current = 0;
+  while (weeks.has(cursor)) {
+    current += 1;
+    cursor = shiftIsoWeek(cursor, -1);
+  }
+  return { current, longest };
+}
+
+// ---------- Auto-rotate split suggestion ----------
+
+/**
+ * Pick the active split with the largest days-since-last-workout. Returns
+ * null when no split exceeds the gap threshold. Suggests "do Pull next"
+ * style nudge on the daily log page.
+ */
+export function suggestNextSplit(
+  splits: Split[],
+  workouts: Pick<Workout, "date" | "splitId">[],
+  todayDate: string,
+  minGapDays = 3,
+): { splitId: string; daysSince: number } | null {
+  const active = splits.filter((s) => !s.archivedAt);
+  let best: { splitId: string; daysSince: number } | null = null;
+  for (const s of active) {
+    const lastHit = workouts
+      .filter((w) => w.splitId === s.id && w.date < todayDate)
+      .map((w) => w.date)
+      .sort()
+      .pop();
+    const gap = lastHit ? daysBetween(lastHit, todayDate) : 999;
+    if (gap < minGapDays) continue;
+    if (!best || gap > best.daysSince) best = { splitId: s.id, daysSince: gap };
+  }
+  return best;
+}
+
+// ---------- Progression suggestion (linear) ----------
+
+export type ProgressionSuggestion =
+  | { kind: "bump"; weightKg: number; reps: number; message: string }
+  | { kind: "repeat"; weightKg: number; reps: number; message: string }
+  | { kind: "none" };
+
+/**
+ * Last-session-aware linear progression:
+ *   - All sets at same weight and hit ≥targetReps → bump +weightStep at targetReps.
+ *   - Otherwise → repeat last weight at targetReps.
+ *   - No history or no valid sets (missing reps/weight) → none.
+ */
+export function computeProgressionSuggestion(
+  lastSessionSets: { reps: number | null; weightKg: number | null }[],
+  targetReps = 8,
+  weightStep = 2.5,
+): ProgressionSuggestion {
+  if (lastSessionSets.length === 0) return { kind: "none" };
+  const valid = lastSessionSets.filter(
+    (s) => (s.reps ?? 0) > 0 && (s.weightKg ?? 0) > 0,
+  );
+  if (valid.length === 0) return { kind: "none" };
+  const allHitTarget = valid.every((s) => (s.reps ?? 0) >= targetReps);
+  const allSameWeight = valid.every((s) => s.weightKg === valid[0].weightKg);
+  const lastWeight = valid[0].weightKg!;
+  if (allHitTarget && allSameWeight) {
+    const next = lastWeight + weightStep;
+    return {
+      kind: "bump",
+      weightKg: next,
+      reps: targetReps,
+      message: `Try ${next}kg × ${targetReps}`,
+    };
+  }
+  return {
+    kind: "repeat",
+    weightKg: lastWeight,
+    reps: targetReps,
+    message: `Repeat ${lastWeight}kg`,
+  };
+}
+
+// Silence unused imports kept for symmetry.
+void addDays;
+void parseDate;
+
 // ---------- Calendar day status (5-bucket palette by volume) ----------
 
 /**
