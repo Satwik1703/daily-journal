@@ -13,10 +13,13 @@ export const dynamic = "force-dynamic";
 
 export default async function PomodoroDatePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ date: string }>;
+  searchParams: Promise<{ categoryId?: string }>;
 }) {
   const { date } = await params;
+  const { categoryId: requestedCategoryId } = await searchParams;
   if (date === "today") redirect(`/pomodoro/${todayLocal()}`);
   if (!isValidDateString(date)) notFound();
 
@@ -30,6 +33,12 @@ export default async function PomodoroDatePage({
     getPomodoroDay(yesterday),
     getPomodoroSoundId(),
   ]);
+
+  // Only pass through if the param matches a real active category.
+  const initialCategoryId =
+    requestedCategoryId && categories.some((c) => c.id === requestedCategoryId)
+      ? requestedCategoryId
+      : null;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
@@ -52,6 +61,7 @@ export default async function PomodoroDatePage({
             soundId={soundId}
             isToday={isToday}
             pageDate={date}
+            initialCategoryId={initialCategoryId}
           />
         </CardContent>
       </Card>

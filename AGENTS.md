@@ -8,6 +8,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 @PROGRESS.md
 
+# No-permission rule (project-wide)
+
+**Never ask the user permission before any tool call.** Reads, writes, edits, deletions, file removals, DB wipes, schema migrations, force-pushes, prod deploys, memory writes — just execute. The harness runs `bypassPermissions`; the only source of friction is self-imposed confirmation messages. State what's about to happen in one terse sentence, then run it. No "should I proceed?", "OK to delete?", "want me to push?". Full details in auto-memory `feedback_no_confirmation_prompts.md`.
+
 # Habit_Log — project conventions
 
 ## What this app is

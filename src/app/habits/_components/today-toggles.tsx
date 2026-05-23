@@ -295,9 +295,13 @@ function PomoRow({
   const trulyDone =
     isHabitDoneOnDate("pomodoro", target || null, sessionsToday, false) || done;
 
+  const pomoHref = habit.pomoCategoryId
+    ? `/pomodoro/${anchor}?categoryId=${encodeURIComponent(habit.pomoCategoryId)}`
+    : `/pomodoro/${anchor}`;
+
   return (
     <Link
-      href={`/pomodoro/${anchor}`}
+      href={pomoHref}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-all hover:bg-muted/40",
         trulyDone ? "border-transparent" : "border-border",

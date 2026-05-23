@@ -85,11 +85,14 @@ export function TimerPanel({
   soundId,
   isToday,
   pageDate,
+  initialCategoryId = null,
 }: {
   categories: PomoCategory[];
   soundId: string;
   isToday: boolean;
   pageDate: string;
+  /** From `?categoryId=` URL param. Wins over the localStorage "last used" cache. */
+  initialCategoryId?: string | null;
 }) {
   // ----- initial state from localStorage (lazy init)
   const [phase, setPhase] = useState<Phase>("idle");
@@ -162,17 +165,28 @@ export function TimerPanel({
       });
   }
 
-  // ----- mount: hydrate from localStorage
+  // ----- mount: hydrate from URL param > localStorage > null
   useEffect(() => {
-    const last = localStorage.getItem(LAST_CATEGORY_KEY);
-    if (last) setCategoryId(last);
+    // Priority: URL ?categoryId= (validated server-side) > localStorage last used.
+    if (initialCategoryId) {
+      setCategoryId(initialCategoryId);
+      try {
+        localStorage.setItem(LAST_CATEGORY_KEY, initialCategoryId);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      const last = localStorage.getItem(LAST_CATEGORY_KEY);
+      if (last && categories.some((c) => c.id === last)) setCategoryId(last);
+    }
     const lastDur = localStorage.getItem(LAST_DURATION_KEY);
     if (lastDur === "full" || lastDur === "half") setDurationKey(lastDur);
 
     const a = loadActive();
     if (!a) return;
     setActive(a);
-    setCategoryId(a.categoryId);
+    // Don't let a resumed session override an explicit URL categoryId.
+    if (!initialCategoryId) setCategoryId(a.categoryId);
     setDurationKey(a.plannedMin === 30 ? "half" : "full");
 
     const elapsed = computeElapsedMs(a, Date.now());

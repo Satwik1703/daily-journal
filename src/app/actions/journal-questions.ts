@@ -66,3 +66,28 @@ export async function unarchiveQuestion(id: string): Promise<void> {
   revalidatePath("/settings");
   revalidatePath("/journal", "layout");
 }
+
+/**
+ * Persist a new ordering for active daily questions. The array index becomes
+ * the `position` value. Validates that every id is a non-empty string but
+ * does not assert membership in the active set — orphaned ids no-op.
+ */
+export async function reorderQuestions(orderedIds: string[]): Promise<void> {
+  if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  const seen = new Set<string>();
+  for (const id of orderedIds) {
+    if (typeof id !== "string" || !id) throw new Error("invalid id in orderedIds");
+    if (seen.has(id)) throw new Error("duplicate id in orderedIds");
+    seen.add(id);
+  }
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await tx
+        .update(journalQuestions)
+        .set({ position: i })
+        .where(eq(journalQuestions.id, orderedIds[i]));
+    }
+  });
+  revalidatePath("/settings");
+  revalidatePath("/journal", "layout");
+}

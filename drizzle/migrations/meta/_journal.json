@@ -36,6 +36,13 @@
       "when": 1779317853895,
       "tag": "0004_skinny_cargill",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1779546188849,
+      "tag": "0005_stormy_whizzer",
+      "breakpoints": true
     }
   ]
 }

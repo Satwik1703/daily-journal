@@ -1,7 +1,34 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Plus, MoreHorizontal, Pencil, Archive, RotateCcw, AlignLeft, Sliders, ToggleLeft } from "lucide-react";
+import {
+  Plus,
+  MoreHorizontal,
+  Pencil,
+  Archive,
+  RotateCcw,
+  AlignLeft,
+  Sliders,
+  ToggleLeft,
+  GripVertical,
+} from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +53,7 @@ import { toast } from "sonner";
 import {
   archiveQuestion,
   createQuestion,
+  reorderQuestions,
   unarchiveQuestion,
   updateQuestion,
 } from "@/app/actions/journal-questions";
@@ -48,7 +76,38 @@ export function QuestionsManager({
   const [editing, setEditing] = useState<JournalQuestion | null>(null);
   const [adding, setAdding] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [orderedActive, setOrderedActive] = useState<JournalQuestion[]>(active);
   const [, startTransition] = useTransition();
+
+  // Sync local order with the server-provided list whenever it changes
+  // (after revalidate from create / archive / etc).
+  useEffect(() => {
+    setOrderedActive(active);
+  }, [active]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active: a, over } = e;
+    if (!over || a.id === over.id) return;
+    const oldIndex = orderedActive.findIndex((q) => q.id === a.id);
+    const newIndex = orderedActive.findIndex((q) => q.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(orderedActive, oldIndex, newIndex);
+    const previous = orderedActive;
+    setOrderedActive(next);
+    startTransition(async () => {
+      try {
+        await reorderQuestions(next.map((q) => q.id));
+      } catch (err) {
+        setOrderedActive(previous);
+        toast.error(err instanceof Error ? err.message : "Failed to reorder");
+      }
+    });
+  }
 
   return (
     <Card>
@@ -62,24 +121,35 @@ export function QuestionsManager({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
-        {active.length === 0 ? (
+        {orderedActive.length === 0 ? (
           <p className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
             No daily questions yet. Add one — e.g. <em>“Did I move my body today?”</em>
           </p>
         ) : (
-          active.map((q) => (
-            <Row
-              key={q.id}
-              q={q}
-              onEdit={() => setEditing(q)}
-              onArchive={() => {
-                startTransition(async () => {
-                  await archiveQuestion(q.id);
-                  toast.success("Archived");
-                });
-              }}
-            />
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={orderedActive.map((q) => q.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {orderedActive.map((q) => (
+                <SortableRow
+                  key={q.id}
+                  q={q}
+                  onEdit={() => setEditing(q)}
+                  onArchive={() => {
+                    startTransition(async () => {
+                      await archiveQuestion(q.id);
+                      toast.success("Archived");
+                    });
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
 
         {archived.length > 0 ? (
@@ -126,6 +196,38 @@ export function QuestionsManager({
   );
 }
 
+function SortableRow({
+  q,
+  onEdit,
+  onArchive,
+}: {
+  q: JournalQuestion;
+  onEdit: () => void;
+  onArchive: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: q.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Row
+        q={q}
+        onEdit={onEdit}
+        onArchive={onArchive}
+        dragHandleProps={{ ...attributes, ...listeners }}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
+
+type DragHandleProps = React.HTMLAttributes<HTMLButtonElement>;
+
 function Row({
   q,
   onEdit,
@@ -133,6 +235,8 @@ function Row({
   muted = false,
   archiveLabel = "Archive",
   ArchiveIcon = Archive,
+  dragHandleProps,
+  isDragging = false,
 }: {
   q: JournalQuestion;
   onEdit: () => void;
@@ -140,15 +244,33 @@ function Row({
   muted?: boolean;
   archiveLabel?: string;
   ArchiveIcon?: typeof Archive;
+  dragHandleProps?: DragHandleProps;
+  isDragging?: boolean;
 }) {
   const meta = TYPES.find((t) => t.value === q.type);
   return (
-    <div className={cn("flex items-center gap-3 rounded-md px-2 py-2", muted && "opacity-60")}>
-      {meta ? (
-        <meta.Icon className="size-4 shrink-0 text-muted-foreground" />
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-md px-2 py-2",
+        muted && "opacity-60",
+        isDragging && "bg-muted/40 shadow-sm",
+      )}
+    >
+      {dragHandleProps ? (
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          className="-ml-1 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          {...dragHandleProps}
+        >
+          <GripVertical className="size-4" />
+        </button>
       ) : null}
+      {meta ? <meta.Icon className="size-4 shrink-0 text-muted-foreground" /> : null}
       <span className="min-w-0 flex-1 truncate text-sm">{q.label}</span>
-      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{meta?.label}</span>
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {meta?.label}
+      </span>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Options" />}>
           <MoreHorizontal />
@@ -182,7 +304,6 @@ function QuestionDialog({
   const [type, setType] = useState<QType>("text");
   const [pending, startTransition] = useTransition();
 
-  // Reset form fields when the dialog opens.
   useEffect(() => {
     if (open) {
       setLabel(question?.label ?? "");

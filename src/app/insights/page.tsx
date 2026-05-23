@@ -248,7 +248,7 @@ export default async function InsightsPage({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <HourHistogram hourMinutes={pomoWindow.hourHistogram} />
+          <HourHistogram samples={pomoWindow.hourSamples} />
         </CardContent>
       </Card>
 

@@ -27,6 +27,7 @@ import { ReflectionPrompt } from "./_components/reflection-prompt";
 import { HistoryStrip } from "./_components/history-strip";
 import { YearHeatmap } from "./_components/year-heatmap";
 import { CascadeChildren } from "./_components/cascade-children";
+import { GroupBreak } from "@/components/ui/group-break";
 
 export const dynamic = "force-dynamic";
 
@@ -121,49 +122,77 @@ export default async function GoalsPage({
         count={goalsNeedingReflection.length}
       />
 
-      <PeriodSummaryCard
-        goals={goalsForPeriod}
-        period={period}
-        periodKey={anchor}
-      />
+      {(() => {
+        const pinnedGoals = goalsForPeriod.filter((g) => g.pinned);
+        const restGoals = goalsForPeriod.filter((g) => !g.pinned);
+        const hasPinned = pinnedGoals.length > 0;
 
-      {goalsForPeriod.length === 0 ? (
-        <GoalsEmptyState period={period} isPast={isPast} isFuture={isFuture} />
-      ) : (
-        <div className="space-y-3">
-          {goalsForPeriod.map((goal) => {
-            const needsReflection =
-              goal.finalizedAt != null &&
-              goal.reflectionSavedAt == null &&
-              goal.status !== "archived";
-            const isFirstReflect =
-              needsReflection && goal.id === goalsNeedingReflection[0]?.id;
-            const children = childrenByParent[goal.id] ?? [];
-            return (
-              <div key={goal.id} className="space-y-0">
-                <GoalCard
+        const renderGoal = (goal: (typeof goalsForPeriod)[number]) => {
+          const needsReflection =
+            goal.finalizedAt != null &&
+            goal.reflectionSavedAt == null &&
+            goal.status !== "archived";
+          const isFirstReflect =
+            needsReflection && goal.id === goalsNeedingReflection[0]?.id;
+          const children = childrenByParent[goal.id] ?? [];
+          return (
+            <div key={goal.id} className="space-y-0">
+              <GoalCard
+                goal={goal}
+                periodStart={start}
+                periodEnd={end}
+                today={today}
+                habits={habitOptions}
+                categories={pomoCategories}
+              />
+              {children.length > 0 ? (
+                <CascadeChildren items={children} today={today} />
+              ) : null}
+              {needsReflection ? (
+                <ReflectionPrompt
                   goal={goal}
-                  periodStart={start}
                   periodEnd={end}
-                  today={today}
-                  habits={habitOptions}
-                  categories={pomoCategories}
+                  anchorId={isFirstReflect ? "first-reflect" : undefined}
                 />
-                {children.length > 0 ? (
-                  <CascadeChildren items={children} today={today} />
-                ) : null}
-                {needsReflection ? (
-                  <ReflectionPrompt
-                    goal={goal}
-                    periodEnd={end}
-                    anchorId={isFirstReflect ? "first-reflect" : undefined}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
+              ) : null}
+            </div>
+          );
+        };
+
+        return (
+          <>
+            {hasPinned ? (
+              <>
+                <PeriodSummaryCard
+                  goals={pinnedGoals}
+                  period={period}
+                  periodKey={anchor}
+                  title="Important"
+                />
+                <div className="space-y-3">{pinnedGoals.map(renderGoal)}</div>
+                <GroupBreak label="All goals" />
+              </>
+            ) : null}
+
+            <PeriodSummaryCard
+              goals={hasPinned ? restGoals : goalsForPeriod}
+              period={period}
+              periodKey={anchor}
+              title={hasPinned ? "Other goals" : undefined}
+            />
+
+            {goalsForPeriod.length === 0 ? (
+              <GoalsEmptyState period={period} isPast={isPast} isFuture={isFuture} />
+            ) : restGoals.length === 0 && hasPinned ? (
+              <p className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-6 text-center text-xs text-muted-foreground">
+                Everything else is pinned. Untick &ldquo;Pin to top&rdquo; on a goal to surface it here.
+              </p>
+            ) : (
+              <div className="space-y-3">{restGoals.map(renderGoal)}</div>
+            )}
+          </>
+        );
+      })()}
 
       {yearHeatmap ? (
         <YearHeatmap year={Number(anchor)} byWeek={yearHeatmap.byWeek} />

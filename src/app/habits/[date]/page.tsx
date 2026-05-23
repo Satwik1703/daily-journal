@@ -6,6 +6,7 @@ import { TodayToggles } from "../_components/today-toggles";
 import { HabitGrid } from "../_components/habit-grid";
 import { HabitList } from "../_components/habit-list";
 import { AddHabitButton } from "../_components/add-habit-button";
+import { HabitsProgressCard } from "../_components/habits-progress-card";
 import { HabitsDateStepper } from "./_components/habits-date-stepper";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,11 @@ export default async function HabitsDatePage({
         <EmptyState isToday={isToday} />
       ) : (
         <>
+          <HabitsProgressCard
+            completed={snapshot.doneOnAnchorIds.size}
+            total={activeForAnchor.length}
+            isToday={isToday}
+          />
           <TodayToggles
             anchor={date}
             isToday={isToday}

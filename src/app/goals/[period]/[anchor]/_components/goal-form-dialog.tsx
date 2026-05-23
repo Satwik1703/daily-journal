@@ -68,6 +68,7 @@ export function GoalFormDialog({
   const [pomoCategoryId, setPomoCategoryId] = useState<string>(""); // "" = all
   const [pomoMetric, setPomoMetric] = useState<PomoMetric>("minutes");
   const [autoSplit, setAutoSplit] = useState<boolean>(period !== "week");
+  const [pinned, setPinned] = useState<boolean>(false);
 
   // ---------- Reverse-cascade state (week view only) ----------
   const today = todayLocal();
@@ -99,6 +100,7 @@ export function GoalFormDialog({
     setPomoCategoryId("");
     setPomoMetric("minutes");
     setAutoSplit(period !== "week");
+    setPinned(false);
     setRepeat("week");
     setRepeatMonth(futureMonthKeys[0] ?? todayMonthKey);
   }
@@ -173,6 +175,7 @@ export function GoalFormDialog({
           pomoCategoryId: type === "pomodoro" && pomoCategoryId ? pomoCategoryId : null,
           pomoMetric: type === "pomodoro" ? pomoMetric : null,
           autoSplitChildren: autoSplit && period !== "week" && needsTarget,
+          pinned,
           repeat: isReverseCascade
             ? {
                 through: repeat as "endOfMonth" | "endOfYear",
@@ -246,6 +249,19 @@ export function GoalFormDialog({
               ))}
             </div>
           </div>
+
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/20 px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pinned}
+              onChange={(e) => setPinned(e.target.checked)}
+              className="size-4"
+            />
+            <span className="flex-1">Pin to top section</span>
+            <span className="text-[11px] text-muted-foreground">
+              Surfaces in &ldquo;Important&rdquo;
+            </span>
+          </label>
 
           <div className="space-y-1.5">
             <Label>Type</Label>

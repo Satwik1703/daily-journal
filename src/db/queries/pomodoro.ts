@@ -34,7 +34,6 @@ export type PomodoroDay = {
   sessions: Array<PomoSession & { category: { name: string; color: string; emoji: string | null } | null }>;
   totals: DayTotals;
   byCategory: DayCategoryAgg[];
-  hourMinutes: number[]; // length 24
 };
 
 export async function getPomodoroDay(date: DateString): Promise<PomodoroDay> {
@@ -62,7 +61,6 @@ export async function getPomodoroDay(date: DateString): Promise<PomodoroDay> {
 
   const totals: DayTotals = { count: 0, minutes: 0, pomos: 0 };
   const byCatMap = new Map<string, DayCategoryAgg>();
-  const hourMinutes = new Array<number>(24).fill(0);
 
   for (const s of sessions) {
     totals.count += 1;
@@ -83,17 +81,18 @@ export async function getPomodoroDay(date: DateString): Promise<PomodoroDay> {
     agg.minutes += s.durationMin;
     agg.pomos += pomoUnits(s.durationMin);
     byCatMap.set(key, agg);
-
-    const hr = new Date(s.startedAt).getHours();
-    hourMinutes[hr] += s.durationMin;
   }
+
+  // Hour-of-day bucketing is intentionally NOT computed here — server runtime
+  // (Vercel UTC) would bucket by UTC hour, not the user's local hour.
+  // day-stats-card.tsx + insights/_components/hour-histogram.tsx aggregate
+  // hours client-side from sessions[].startedAt so the browser TZ wins.
 
   return {
     date,
     sessions,
     totals,
     byCategory: Array.from(byCatMap.values()).sort((a, b) => b.minutes - a.minutes),
-    hourMinutes,
   };
 }
 
@@ -105,13 +104,19 @@ export type PomodoroDailyRow = {
   byCategory: Map<string, DayCategoryAgg>;
 };
 
+export type HourSample = {
+  startedAt: Date;
+  durationMin: number;
+};
+
 export type PomodoroWindow = {
   start: DateString;
   end: DateString;
   daily: PomodoroDailyRow[];
   totals: DayTotals;
   topCategories: DayCategoryAgg[];
-  hourHistogram: number[]; // length 24, total minutes per hour-of-day in range
+  /** Raw start times for client-side hour-of-day bucketing (TZ-correct). */
+  hourSamples: HourSample[];
   longestSession: PomoSession | null;
   activeDates: Set<DateString>;
 };
@@ -143,7 +148,7 @@ export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWind
 
   const totals: DayTotals = { count: 0, minutes: 0, pomos: 0 };
   const topMap = new Map<string, DayCategoryAgg>();
-  const hourHistogram = new Array<number>(24).fill(0);
+  const hourSamples: HourSample[] = [];
   let longest: PomoSession | null = null;
   const activeDates = new Set<DateString>();
 
@@ -201,7 +206,7 @@ export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWind
     totals.minutes += s.durationMin;
     totals.pomos += units;
 
-    hourHistogram[new Date(s.startedAt).getHours()] += s.durationMin;
+    hourSamples.push({ startedAt: s.startedAt, durationMin: s.durationMin });
 
     if (!longest || s.durationMin > longest.durationMin) longest = s;
   }
@@ -219,7 +224,7 @@ export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWind
     daily,
     totals,
     topCategories,
-    hourHistogram,
+    hourSamples,
     longestSession: longest,
     activeDates,
   };

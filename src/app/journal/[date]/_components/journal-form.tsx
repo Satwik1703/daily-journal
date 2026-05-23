@@ -10,6 +10,7 @@ import { saveJournalEntry, type JournalPatch } from "@/app/actions/journal";
 import { QuestionsBlock } from "./questions-block";
 import type { JournalQuestion } from "@/db/queries/journal-questions";
 import { cn } from "@/lib/utils";
+import { GroupBreak } from "@/components/ui/group-break";
 
 export type JournalFormState = {
   gratitude1: string;
@@ -183,6 +184,9 @@ export function JournalForm({
       {/* Group 3 — Reflection */}
       <section className="space-y-4">
         <GroupBreak label="Reflection" />
+
+        <QuestionsBlock questions={questions} answers={state.answers} onAnswer={updateAnswer} />
+
         <Card>
           <CardHeader>
             <CardTitle className="text-lg font-serif font-normal">How was today?</CardTitle>
@@ -193,8 +197,6 @@ export function JournalForm({
             <ScaleField label="Sleep quality" value={state.sleepQuality} onChange={(v) => updateScalar("sleepQuality", v)} hint="last night" />
           </CardContent>
         </Card>
-
-        <QuestionsBlock questions={questions} answers={state.answers} onAnswer={updateAnswer} />
       </section>
 
       {/* Group 4 — Looking ahead */}
@@ -260,18 +262,6 @@ function IdentityInput({
           {ghost}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function GroupBreak({ label, first = false }: { label: string; first?: boolean }) {
-  return (
-    <div className={cn("flex items-center gap-3 px-1", first ? "mt-2" : "mt-6")}>
-      <span className="h-px flex-1 bg-border/60" />
-      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
-        {label}
-      </span>
-      <span className="h-px flex-1 bg-border/60" />
     </div>
   );
 }

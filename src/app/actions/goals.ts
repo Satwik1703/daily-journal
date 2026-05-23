@@ -138,6 +138,8 @@ export async function createGoal(input: {
   pomoMetric?: PomoMetric | null;
   parentId?: string | null;
   autoSplitChildren?: boolean;
+  /** Surfaces in the "Important" top section on /goals. Default false. */
+  pinned?: boolean;
   /**
    * Reverse cascade (week → month → year). When set on a week-period goal,
    * the form's standard single-row insert is skipped and we delegate to
@@ -227,6 +229,7 @@ export async function createGoal(input: {
     pomoCategoryId: input.pomoCategoryId ?? null,
     pomoMetric: input.pomoMetric ?? null,
     status: "active",
+    pinned: input.pinned === true,
     position,
   });
 
@@ -460,6 +463,7 @@ export async function updateGoal(input: {
   color?: string;
   targetValue?: number | null;
   unit?: string | null;
+  pinned?: boolean;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
   const patch: Record<string, unknown> = {};
@@ -468,8 +472,15 @@ export async function updateGoal(input: {
   if (input.color !== undefined) patch.color = sanitizeColor(input.color);
   if (input.targetValue !== undefined) patch.targetValue = sanitizeTarget(input.targetValue);
   if (input.unit !== undefined) patch.unit = sanitizeUnit(input.unit);
+  if (input.pinned !== undefined) patch.pinned = input.pinned === true;
   if (Object.keys(patch).length === 0) return;
   await db.update(goals).set(patch).where(eq(goals.id, input.id));
+  revalidateGoals();
+}
+
+export async function setGoalPinned(input: { id: string; pinned: boolean }): Promise<void> {
+  if (!input.id) throw new Error("id is required");
+  await db.update(goals).set({ pinned: input.pinned === true }).where(eq(goals.id, input.id));
   revalidateGoals();
 }
 

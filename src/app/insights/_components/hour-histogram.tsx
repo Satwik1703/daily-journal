@@ -1,6 +1,24 @@
-import { cn } from "@/lib/utils";
+"use client";
 
-export function HourHistogram({ hourMinutes }: { hourMinutes: number[] }) {
+import { useMemo } from "react";
+import { cn } from "@/lib/utils";
+import type { HourSample } from "@/db/queries/pomodoro";
+
+/**
+ * 24-bar hour-of-day strip. Bucket happens in the browser so the user's
+ * actual timezone determines which hour a session belongs to — the server
+ * (Vercel UTC) can't do this correctly without per-user TZ context.
+ */
+export function HourHistogram({ samples }: { samples: HourSample[] }) {
+  const hourMinutes = useMemo(() => {
+    const bins = new Array<number>(24).fill(0);
+    for (const s of samples) {
+      const hr = new Date(s.startedAt).getHours();
+      bins[hr] += s.durationMin;
+    }
+    return bins;
+  }, [samples]);
+
   const max = Math.max(1, ...hourMinutes);
   const totalMin = hourMinutes.reduce((a, b) => a + b, 0);
   if (totalMin === 0) {

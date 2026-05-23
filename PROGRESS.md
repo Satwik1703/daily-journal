@@ -839,6 +839,95 @@ Prod mirror mode now wipes 6 tables (added `habit_value_logs` to the list) befor
 
 ---
 
+## ✅ Phase 7 — UX polish + reorder + pinned goals
+
+Eight friction points smoothed in one bundle, plus a real timezone bug rooted out of the pomodoro hour charts.
+
+Plan: `C:\Users\Admin\.claude\plans\here-are-the-changes-quiet-wadler.md`.
+
+### Shipped
+
+1. **Drag-to-reorder daily questions** on `/settings`.
+   - New deps `@dnd-kit/{core,sortable,utilities}` (4 packages).
+   - New action `reorderQuestions(orderedIds: string[])` in `src/app/actions/journal-questions.ts` — transaction that rewrites `position` to the array index. Validates non-empty, no-duplicates, and revalidates `/settings` + `/journal`.
+   - `src/app/settings/_components/questions-manager.tsx` rewritten — active list wrapped in `<DndContext>` + `<SortableContext>` with `verticalListSortingStrategy`. Each row gets a `GripVertical` drag handle. Optimistic `arrayMove`, revert on error toast. Archived list stays static (no reorder there).
+2. **Journal Reflection section reordered.** `src/app/journal/[date]/_components/journal-form.tsx` — `<QuestionsBlock />` now renders ABOVE the "How was today?" Energy/Mood/Sleep card. Pure JSX move; autosave wiring untouched. While in the file, lifted the local `GroupBreak` into a shared primitive (next item).
+3. **Auto-select pomo category from `/habits` deep-link.**
+   - `today-toggles.tsx:300` `PomoRow` link now appends `?categoryId={pomoCategoryId}` when the habit has one set.
+   - `src/app/pomodoro/[date]/page.tsx` accepts `searchParams: Promise<{ categoryId?: string }>` and validates against `getActiveCategories()` before passing through as `initialCategoryId`.
+   - `src/app/pomodoro/[date]/_components/timer-panel.tsx` mount effect: URL param (validated) wins over `localStorage.pomodoro.lastCategoryId`, which still serves as the fallback for direct visits. URL deep-link also writes to localStorage so the next direct visit remembers it. The manual-session dialog re-uses the resolved `categoryId` state for its default.
+4. **Manual pomo entry — count × kind, sequential.** `src/app/pomodoro/[date]/_components/manual-session-dialog.tsx` rewritten:
+   - Single `duration` input replaced with `pomoCount` (1–10) + `pomoKind` chip selector ("full" 50m / "half" 30m) driven by `POMO_DURATIONS`.
+   - Live readout: `"2 pomos × 50 min = 100 min total"` and "saved as separate sessions back-to-back" hint.
+   - Submit loops `pomoCount` times calling `createSession` with sequential `startedAt = base + i*kindMin*60_000`. Each session's `date` is re-derived from its own `startedAt` via `formatLocalYMD` so sessions that cross midnight land in the right `date` bucket. Partial-success-friendly: on mid-batch error, toasts `"Saved {n} of {pomoCount} — {msg}"` and aborts.
+5. **TZ bug fix — hour-of-day buckets.**
+   - **Root cause:** `src/db/queries/pomodoro.ts:87, 204` called `new Date(s.startedAt).getHours()` server-side. On Vercel (UTC) this returned UTC hours, not the user's local hours. Local dev only worked by accident (your TZ == server TZ).
+   - **Fix:** moved hour bucketing to the client. Query now returns raw `sessions[].startedAt: Date` (PomodoroDay) and a new `hourSamples: { startedAt: Date; durationMin: number }[]` array (PomodoroWindow) instead of pre-bucketed `hourMinutes` / `hourHistogram`.
+   - `day-stats-card.tsx` upgraded to `"use client"` + `useMemo` that re-buckets from `today.sessions`. Browser uses the user's actual TZ.
+   - `hour-histogram.tsx` (insights) rewritten as `"use client"` taking `samples={pomoWindow.hourSamples}` and bucketing client-side. Insights page wires it through.
+6. **Habits progress donut.**
+   - New shared primitive `src/components/ui/progress-donut.tsx` — pure SVG, `var(--muted)` track + `var(--primary)` arc, optional `label`. Goal donut math (radius 30, circumference 2πr, two-arc full-circle path) extracted unchanged.
+   - `period-summary-card.tsx` refactored to use the primitive + accepts an optional `title` prop for "Important" / "Other goals" labelling.
+   - New `src/app/habits/_components/habits-progress-card.tsx` — sibling card to TodayToggles. Computes `percent = doneOnAnchorIds.size / activeForAnchor.length` and renders `"{done}/{total} habits done {today|that day}"`.
+   - Wired into `/habits/[date]/page.tsx` immediately above `<TodayToggles>`.
+7. **Pinned goals top section.**
+   - **Schema migration `0005_stormy_whizzer.sql`** — `goals.pinned: integer not null default 0` + `goals_pinned` index. Applied locally; **prod still pending — run `npm run db:migrate` against prod Turso before the next deploy.**
+   - `src/db/schema.ts` — column added with `mode: "boolean"`.
+   - `src/app/actions/goals.ts` — `createGoal` + `updateGoal` accept optional `pinned: boolean`. New `setGoalPinned({ id, pinned })` action for row-level toggle. Cascade children intentionally inherit `pinned=false` (default) so auto-split monthlies/weeklies don't flood the Important section.
+   - `src/app/goals/[period]/[anchor]/page.tsx` partitions `goalsForPeriod` into `pinned` + `rest`. When `pinned.length > 0` renders a separate `PeriodSummaryCard goals={pinned} title="Important"` + pinned cards loop + `<GroupBreak label="All goals" />` + the "Other goals" donut + rest cards. When nothing pinned, layout matches before.
+   - `goal-form-dialog.tsx` — new "Pin to top section" checkbox above the type radio grid.
+   - `goal-card.tsx` dispatcher now wraps each variant in a `relative` div + a floating `<PinToggleButton goalId={goal.id} pinned={goal.pinned} />` in the top-right corner (`Pin` / `PinOff` lucide icons). New `src/app/goals/[period]/[anchor]/_components/pin-toggle-button.tsx` calls `setGoalPinned` with an optimistic `useTransition` flip.
+8. **PWA `VERSION` bumped `habit-log-v7 → habit-log-v8`** in `public/sw.js`. SHELL array unchanged (no new routes).
+
+### Shared GroupBreak primitive
+
+Lifted `GroupBreak` out of `journal-form.tsx` into `src/components/ui/group-break.tsx` so the goals page can reuse it for the "All goals" hairline divider. Same `cn(first ? "mt-2" : "mt-6")` semantics; supports an optional `className` override.
+
+### Files touched
+
+- `package.json` (+3 dnd-kit deps)
+- `src/db/schema.ts` (goals.pinned + index)
+- `drizzle/migrations/0005_stormy_whizzer.sql`
+- `src/components/ui/{group-break,progress-donut}.tsx` (new)
+- `src/app/actions/{journal-questions,goals,…}.ts` (reorderQuestions, pinned, setGoalPinned)
+- `src/app/settings/_components/questions-manager.tsx` (DndKit)
+- `src/app/journal/[date]/_components/journal-form.tsx` (section swap + GroupBreak import)
+- `src/app/habits/_components/{today-toggles,habits-progress-card}.tsx` + `src/app/habits/[date]/page.tsx`
+- `src/app/pomodoro/[date]/page.tsx` (searchParams)
+- `src/app/pomodoro/[date]/_components/{timer-panel,manual-session-dialog,day-stats-card}.tsx`
+- `src/app/insights/_components/hour-histogram.tsx` + `src/app/insights/page.tsx`
+- `src/db/queries/pomodoro.ts` (drop hourMinutes/hourHistogram, add hourSamples + raw sessions retained)
+- `src/app/goals/[period]/[anchor]/page.tsx` (partition + new section)
+- `src/app/goals/[period]/[anchor]/_components/{goal-form-dialog,goal-card,period-summary-card,pin-toggle-button}.tsx`
+- `public/sw.js` (v7 → v8)
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 14 expected `react-hooks/set-state-in-effect` warnings (questions-manager `useEffect(() => setOrderedActive(active), [active])` adds one; same documented exemption pattern).
+- `npm run build` clean — 18 routes still build (no new top-level routes).
+- Local probes after a clean `.next` rebuild: `/goals/week/2026-W21`, `/goals/month/2026-05`, `/goals/year/2026`, `/habits/{today}`, `/pomodoro/{today}`, `/pomodoro/{today}?categoryId=…`, `/journal/{today}`, `/insights?range=30`, `/settings`, `/more` — all 200.
+- Local DB schema confirmed via `PRAGMA table_info(goals)`: `pinned` column present, default 0; all 140 existing goal rows defaulted to 0.
+
+### Deploy steps (this commit)
+
+1. `git push origin main`.
+2. Prod migration: `npm run db:migrate` with `.env.production.local` loaded — applies `0005_stormy_whizzer.sql`. Additive, safe.
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. PWA: phones pick up `habit-log-v8` on next SW activation.
+5. **Prod verification** — log a 5 PM IST pomo from the live URL → confirm hour chart lights bucket 17:00 (pre-fix prod showed 11:00).
+
+### Things deferred to Phase 7.1+
+
+- Drag-reorder for habits, pomo categories, journal tasks (mirror the questions DndKit pattern — `position` columns already exist).
+- Editing `pinned` from the existing goal edit dialog (currently pin/unpin is via the floating button + new-goal checkbox; no inline edit).
+- Pin button position polish — currently overlays `right-2 top-2` and may visually crowd the PacePill on goal cards. Pending real-device feedback.
+- Reflection summary view across periods, "regenerate cascade" toggle, per-day Walk target overrides, drop legacy `cadence`/`targetPerWeek` columns from habits.
+
+**Resume here for next session:** Phase 7 deployed (assuming prod step ran). Awaiting next direction.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

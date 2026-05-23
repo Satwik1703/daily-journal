@@ -14,10 +14,18 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { isValidDateString, todayLocal } from "@/lib/dates";
+import { cn } from "@/lib/utils";
+import { formatLocalYMD, isValidDateString, todayLocal } from "@/lib/dates";
+import {
+  POMO_DURATIONS,
+  fmtMinutes,
+  type PomoDurationKey,
+} from "@/lib/pomodoro-meta";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
 import { CategoryPicker } from "./category-picker";
 import { createSession } from "@/app/actions/pomodoro";
+
+const MAX_POMOS = 10;
 
 export function ManualSessionDialog({
   open,
@@ -34,7 +42,8 @@ export function ManualSessionDialog({
 }) {
   const [date, setDate] = useState<string>(defaultDate);
   const [time, setTime] = useState<string>("");
-  const [duration, setDuration] = useState<number>(50);
+  const [pomoCount, setPomoCount] = useState<number>(1);
+  const [pomoKind, setPomoKind] = useState<PomoDurationKey>("full");
   const [categoryId, setCategoryId] = useState<string | null>(defaultCategoryId);
   const [description, setDescription] = useState<string>("");
   const [pending, startTransition] = useTransition();
@@ -44,15 +53,18 @@ export function ManualSessionDialog({
     setDate(defaultDate);
     setCategoryId(defaultCategoryId);
     setDescription("");
-    setDuration(50);
-    // sensible default time: now
+    setPomoCount(1);
+    setPomoKind("full");
     const d = new Date();
     setTime(
       `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
     );
   }, [open, defaultDate, defaultCategoryId]);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const kindMin = POMO_DURATIONS.find((d) => d.key === pomoKind)!.min;
+  const totalMin = kindMin * pomoCount;
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!isValidDateString(date)) {
       toast.error("Invalid date");
@@ -62,8 +74,8 @@ export function ManualSessionDialog({
       toast.error("Invalid time");
       return;
     }
-    if (!Number.isFinite(duration) || duration < 1) {
-      toast.error("Duration must be ≥ 1");
+    if (!Number.isInteger(pomoCount) || pomoCount < 1 || pomoCount > MAX_POMOS) {
+      toast.error(`Number of pomos must be 1–${MAX_POMOS}`);
       return;
     }
     if (date > todayLocal()) {
@@ -72,26 +84,45 @@ export function ManualSessionDialog({
     }
     const [y, mo, da] = date.split("-").map(Number);
     const [h, m] = time.split(":").map(Number);
-    const startedAt = new Date(y, mo - 1, da, h, m, 0, 0).getTime();
-    const endedAt = startedAt + duration * 60_000;
+    const baseMs = new Date(y, mo - 1, da, h, m, 0, 0).getTime();
+    const desc = description.trim() || null;
 
     startTransition(async () => {
-      try {
-        await createSession({
-          date,
-          startedAt,
-          endedAt,
-          durationMin: duration,
-          plannedMin: duration,
-          categoryId,
-          description: description.trim() || null,
-          source: "manual",
-        });
-        toast.success(`Logged ${duration}m`);
-        onOpenChange(false);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+      let saved = 0;
+      for (let i = 0; i < pomoCount; i++) {
+        const startedAt = baseMs + i * kindMin * 60_000;
+        const endedAt = startedAt + kindMin * 60_000;
+        // Re-derive date from startedAt so sessions that cross midnight
+        // land in the right `date` bucket.
+        const sessionDate = formatLocalYMD(new Date(startedAt));
+        try {
+          await createSession({
+            date: sessionDate,
+            startedAt,
+            endedAt,
+            durationMin: kindMin,
+            plannedMin: kindMin,
+            categoryId,
+            description: desc,
+            source: "manual",
+          });
+          saved++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Save failed";
+          if (saved === 0) {
+            toast.error(msg);
+          } else {
+            toast.warning(`Saved ${saved} of ${pomoCount} — ${msg}`);
+          }
+          return;
+        }
       }
+      toast.success(
+        pomoCount === 1
+          ? `Logged ${kindMin}m`
+          : `Logged ${pomoCount} pomos · ${fmtMinutes(totalMin)} total`,
+      );
+      onOpenChange(false);
     });
   }
 
@@ -129,17 +160,46 @@ export function ManualSessionDialog({
           </div>
 
           <div className="space-y-1.5 min-w-0">
-            <Label htmlFor="manual-duration">Duration (min)</Label>
+            <Label htmlFor="manual-pomo-count">Number of pomos</Label>
             <Input
-              id="manual-duration"
+              id="manual-pomo-count"
               type="number"
               min={1}
-              max={600}
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
+              max={MAX_POMOS}
+              value={pomoCount}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setPomoCount(Number.isFinite(n) ? Math.max(1, Math.min(MAX_POMOS, Math.floor(n))) : 1);
+              }}
               className="w-full min-w-0"
               required
             />
+          </div>
+
+          <div className="space-y-1.5 min-w-0">
+            <Label>Pomo length</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {POMO_DURATIONS.map((d) => (
+                <button
+                  key={d.key}
+                  type="button"
+                  onClick={() => setPomoKind(d.key)}
+                  className={cn(
+                    "rounded-md border px-2 py-2 text-xs transition-colors",
+                    pomoKind === d.key
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <span className="font-medium">{d.label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground tabular-nums">
+              {pomoCount} {pomoCount === 1 ? "pomo" : "pomos"} × {kindMin} min ={" "}
+              {fmtMinutes(totalMin)} total
+              {pomoCount > 1 ? " · saved as separate sessions back-to-back" : ""}
+            </p>
           </div>
 
           <div className="space-y-1.5 min-w-0">
@@ -161,6 +221,11 @@ export function ManualSessionDialog({
               className="w-full min-w-0"
               rows={3}
             />
+            {pomoCount > 1 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Same description applied to all {pomoCount} sessions.
+              </p>
+            ) : null}
           </div>
 
           <DialogFooter>
@@ -168,7 +233,11 @@ export function ManualSessionDialog({
               Cancel
             </DialogClose>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Add"}
+              {pending
+                ? "Saving…"
+                : pomoCount === 1
+                  ? "Add"
+                  : `Add ${pomoCount} pomos`}
             </Button>
           </DialogFooter>
         </form>

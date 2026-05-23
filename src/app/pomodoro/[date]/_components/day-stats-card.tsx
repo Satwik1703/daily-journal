@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { fmtMinutes, fmtPomos } from "@/lib/pomodoro-meta";
@@ -18,7 +21,17 @@ export function DayStatsCard({
   const diffMin = t.minutes - p.minutes;
   const diffPomos = t.pomos - p.pomos;
 
-  const hourMax = Math.max(1, ...today.hourMinutes);
+  // Bucket hour-of-day client-side so the user's actual TZ wins
+  // (server query runs on Vercel UTC and would mis-bucket).
+  const hourMinutes = useMemo(() => {
+    const bins = new Array<number>(24).fill(0);
+    for (const s of today.sessions) {
+      const hr = new Date(s.startedAt).getHours();
+      bins[hr] += s.durationMin;
+    }
+    return bins;
+  }, [today.sessions]);
+  const hourMax = Math.max(1, ...hourMinutes);
 
   return (
     <Card>
@@ -82,7 +95,7 @@ export function DayStatsCard({
             <span className="normal-case tracking-normal text-muted-foreground/70">12 AM → 11 PM</span>
           </div>
           <div className="flex h-16 items-end gap-[2px]">
-            {today.hourMinutes.map((m, hr) => {
+            {hourMinutes.map((m, hr) => {
               const h = hourMax > 0 ? (m / hourMax) * 100 : 0;
               return (
                 <div

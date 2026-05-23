@@ -240,6 +240,8 @@ export const goals = sqliteTable(
     reflectionRating: integer("reflection_rating"),
     reflectionLinkedDate: text("reflection_linked_date"),
     reflectionSavedAt: integer("reflection_saved_at", { mode: "timestamp" }),
+    // Phase 7: when true, surfaces in the "Important" top section on /goals.
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     position: integer("position").notNull().default(0),
     archivedAt: integer("archived_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
@@ -250,6 +252,7 @@ export const goals = sqliteTable(
     index("goals_period_key").on(t.period, t.periodKey),
     index("goals_parent").on(t.parentId),
     index("goals_status").on(t.status),
+    index("goals_pinned").on(t.pinned),
   ],
 );
 
