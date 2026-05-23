@@ -1,7 +1,31 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Plus, MoreHorizontal, Pencil, Archive, RotateCcw } from "lucide-react";
+import {
+  Plus,
+  MoreHorizontal,
+  Pencil,
+  Archive,
+  RotateCcw,
+  GripVertical,
+} from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +54,7 @@ import {
   updateCategory,
   archiveCategory,
   unarchiveCategory,
+  reorderCategories,
 } from "@/app/actions/pomodoro-categories";
 
 const SUGGESTED_EMOJI = ["💼", "📚", "📖", "🏃", "🎨", "✨", "🧘", "💻", "🎯", "✏️"];
@@ -44,7 +69,36 @@ export function PomodoroCategoriesManager({
   const [editing, setEditing] = useState<PomoCategory | null>(null);
   const [adding, setAdding] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [orderedActive, setOrderedActive] = useState<PomoCategory[]>(active);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    setOrderedActive(active);
+  }, [active]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active: a, over } = e;
+    if (!over || a.id === over.id) return;
+    const oldIndex = orderedActive.findIndex((c) => c.id === a.id);
+    const newIndex = orderedActive.findIndex((c) => c.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(orderedActive, oldIndex, newIndex);
+    const previous = orderedActive;
+    setOrderedActive(next);
+    startTransition(async () => {
+      try {
+        await reorderCategories(next.map((c) => c.id));
+      } catch (err) {
+        setOrderedActive(previous);
+        toast.error(err instanceof Error ? err.message : "Failed to reorder");
+      }
+    });
+  }
 
   return (
     <Card>
@@ -57,24 +111,35 @@ export function PomodoroCategoriesManager({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
-        {active.length === 0 ? (
+        {orderedActive.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">
             No categories. Add one above.
           </p>
         ) : (
-          active.map((c) => (
-            <Row
-              key={c.id}
-              category={c}
-              onEdit={() => setEditing(c)}
-              onArchive={() => {
-                startTransition(async () => {
-                  await archiveCategory(c.id);
-                  toast.success(`Archived "${c.name}"`);
-                });
-              }}
-            />
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={orderedActive.map((c) => c.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {orderedActive.map((c) => (
+                <SortableRow
+                  key={c.id}
+                  category={c}
+                  onEdit={() => setEditing(c)}
+                  onArchive={() => {
+                    startTransition(async () => {
+                      await archiveCategory(c.id);
+                      toast.success(`Archived "${c.name}"`);
+                    });
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
         {archived.length > 0 ? (
           <button
@@ -119,6 +184,38 @@ export function PomodoroCategoriesManager({
   );
 }
 
+function SortableRow({
+  category,
+  onEdit,
+  onArchive,
+}: {
+  category: PomoCategory;
+  onEdit: () => void;
+  onArchive: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: category.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Row
+        category={category}
+        onEdit={onEdit}
+        onArchive={onArchive}
+        dragHandleProps={{ ...attributes, ...listeners }}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
+
+type DragHandleProps = React.HTMLAttributes<HTMLButtonElement>;
+
 function Row({
   category,
   onEdit,
@@ -126,6 +223,8 @@ function Row({
   muted = false,
   archiveLabel = "Archive",
   ArchiveIcon = Archive,
+  dragHandleProps,
+  isDragging = false,
 }: {
   category: PomoCategory;
   onEdit: () => void;
@@ -133,14 +232,27 @@ function Row({
   muted?: boolean;
   archiveLabel?: string;
   ArchiveIcon?: typeof Archive;
+  dragHandleProps?: DragHandleProps;
+  isDragging?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-md px-2 py-2",
+        "flex items-center gap-2 rounded-md px-2 py-2",
         muted && "opacity-60",
+        isDragging && "bg-muted/40 shadow-sm",
       )}
     >
+      {dragHandleProps ? (
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          className="-ml-1 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          {...dragHandleProps}
+        >
+          <GripVertical className="size-4" />
+        </button>
+      ) : null}
       <span
         aria-hidden
         className="flex size-7 shrink-0 items-center justify-center rounded-full text-sm"

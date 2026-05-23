@@ -7,7 +7,8 @@ import { todayLocal } from "@/lib/dates";
 export default function PomodoroIndex() {
   const router = useRouter();
   useEffect(() => {
-    router.replace(`/pomodoro/${todayLocal()}`);
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    router.replace(`/pomodoro/${todayLocal()}${search}`);
   }, [router]);
   return null;
 }

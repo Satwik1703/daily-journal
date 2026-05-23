@@ -2,7 +2,7 @@
 
 import { db } from "@/db/client";
 import { goals, goalProgress, goalChecklist, journalTasks, journalEntries } from "@/db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import {
@@ -476,6 +476,201 @@ export async function updateGoal(input: {
   if (Object.keys(patch).length === 0) return;
   await db.update(goals).set(patch).where(eq(goals.id, input.id));
   revalidateGoals();
+}
+
+// ---------- Cross-level cascade edit + delete ----------
+
+type GoalRow = typeof goals.$inferSelect;
+type TreeNode = GoalRow & { children: TreeNode[] };
+
+async function findRoot(id: string): Promise<GoalRow | null> {
+  let current = await findGoalById(id);
+  if (!current) return null;
+  while (current.parentId) {
+    const next = await findGoalById(current.parentId);
+    if (!next) break;
+    current = next;
+  }
+  return current;
+}
+
+async function loadTree(rootId: string): Promise<TreeNode | null> {
+  const root = await findGoalById(rootId);
+  if (!root) return null;
+  const node: TreeNode = { ...root, children: [] };
+  const queue: TreeNode[] = [node];
+  while (queue.length > 0) {
+    const ids = queue.map((n) => n.id);
+    queue.length = 0;
+    const kids =
+      ids.length === 0
+        ? []
+        : await db.select().from(goals).where(inArray(goals.parentId, ids));
+    if (kids.length === 0) break;
+    const byParent = new Map<string, TreeNode[]>();
+    for (const k of kids) {
+      const t: TreeNode = { ...k, children: [] };
+      const arr = byParent.get(k.parentId ?? "") ?? [];
+      arr.push(t);
+      byParent.set(k.parentId ?? "", arr);
+      queue.push(t);
+    }
+    function attach(n: TreeNode) {
+      const c = byParent.get(n.id);
+      if (c) n.children = c;
+      n.children.forEach(attach);
+    }
+    attach(node);
+  }
+  return node;
+}
+
+function isFutureOrCurrent(g: { period: string; periodKey: string }, today: string): boolean {
+  return periodRangeFor(g.periodKey, g.period as GoalPeriod).end >= today;
+}
+
+function flattenTree(n: TreeNode): TreeNode[] {
+  const out: TreeNode[] = [n];
+  for (const c of n.children) out.push(...flattenTree(c));
+  return out;
+}
+
+/**
+ * Edit a goal and propagate changes through the cascade tree to every
+ * current/future instance. Past instances are frozen.
+ *
+ * Non-target fields (title/emoji/color/unit/habitId/pomoCategoryId/pomoMetric/pinned)
+ * copy to every current/future node in the tree.
+ *
+ * Target changes pivot around the source goal's level:
+ *  - Set every current/future node at the source's level to the new target.
+ *  - Walk UP: ancestor target = sum of children targets (past untouched).
+ *  - Walk DOWN: split parent target across current/future children via
+ *    autoSplitTargets, subtracting past children's targets first.
+ *
+ * `type` is not editable post-creation (data model would diverge).
+ */
+export async function updateGoalCascade(input: {
+  id: string;
+  title?: string;
+  emoji?: string | null;
+  color?: string;
+  targetValue?: number | null;
+  unit?: string | null;
+  habitId?: string | null;
+  pomoCategoryId?: string | null;
+  pomoMetric?: PomoMetric | null;
+  pinned?: boolean;
+}): Promise<void> {
+  if (!input.id) throw new Error("id is required");
+  const source = await findGoalById(input.id);
+  if (!source) throw new Error("Goal not found");
+
+  const root = await findRoot(source.id);
+  if (!root) throw new Error("Goal root not found");
+  const tree = await loadTree(root.id);
+  if (!tree) throw new Error("Goal tree not found");
+
+  const today = todayLocal();
+  const all = flattenTree(tree);
+
+  // Sanitize non-target patch fields.
+  const patchBase: Record<string, unknown> = {};
+  if (input.title !== undefined) patchBase.title = sanitizeTitle(input.title);
+  if (input.emoji !== undefined) patchBase.emoji = sanitizeEmoji(input.emoji);
+  if (input.color !== undefined) patchBase.color = sanitizeColor(input.color);
+  if (input.unit !== undefined) patchBase.unit = sanitizeUnit(input.unit);
+  if (input.habitId !== undefined) patchBase.habitId = input.habitId;
+  if (input.pomoCategoryId !== undefined) patchBase.pomoCategoryId = input.pomoCategoryId;
+  if (input.pomoMetric !== undefined) patchBase.pomoMetric = input.pomoMetric ?? null;
+  if (input.pinned !== undefined) patchBase.pinned = input.pinned === true;
+
+  const newTargetProvided = input.targetValue !== undefined;
+  const newTarget = newTargetProvided ? sanitizeTarget(input.targetValue) : null;
+  const sourceLevel = source.period as GoalPeriod;
+  const isReal = (source.unit === "min" || source.unit === "minutes");
+
+  if (newTargetProvided) {
+    // Step 1: set source-level current/future nodes to newTarget.
+    for (const n of all) {
+      if (n.period === sourceLevel && isFutureOrCurrent(n, today)) {
+        n.targetValue = newTarget;
+      }
+    }
+
+    // Step 2: recompute. Ancestors (above sourceLevel) post-order sum children;
+    // descendants (below sourceLevel) top-down split parent target.
+    const recompute = (n: TreeNode): void => {
+      if (n.period === sourceLevel) {
+        redistribute(n);
+        return;
+      }
+      for (const c of n.children) recompute(c);
+      if (isFutureOrCurrent(n, today)) {
+        const sum = n.children.reduce((acc, c) => acc + (c.targetValue ?? 0), 0);
+        n.targetValue = sum;
+      }
+    };
+    const redistribute = (n: TreeNode): void => {
+      if (n.children.length === 0) return;
+      if (!isFutureOrCurrent(n, today)) return;
+      const past = n.children.filter((c) => !isFutureOrCurrent(c, today));
+      const future = n.children.filter((c) => isFutureOrCurrent(c, today));
+      const pastSum = past.reduce((acc, c) => acc + (c.targetValue ?? 0), 0);
+      const remainder = Math.max(0, (n.targetValue ?? 0) - pastSum);
+      if (future.length > 0) {
+        const split = autoSplitTargets(remainder, future.length, isReal);
+        future.forEach((c, i) => {
+          c.targetValue = split[i] ?? 0;
+        });
+      }
+      for (const c of future) redistribute(c);
+    };
+    recompute(tree);
+  }
+
+  // Persist: every current/future node gets patchBase. If target changed, also
+  // write recomputed targetValue (covers past ancestors whose target we DIDN'T
+  // change too — those still have their original value, so writing them is a
+  // no-op).
+  await db.transaction(async (tx) => {
+    for (const n of all) {
+      const future = isFutureOrCurrent(n, today);
+      const updates: Record<string, unknown> = {};
+      if (future) Object.assign(updates, patchBase);
+      if (newTargetProvided) updates.targetValue = n.targetValue;
+      if (Object.keys(updates).length === 0) continue;
+      await tx.update(goals).set(updates).where(eq(goals.id, n.id));
+    }
+  });
+
+  revalidateGoals();
+  revalidatePath("/habits", "layout");
+  revalidatePath("/journal", "layout");
+}
+
+/**
+ * Delete the cascade tree across the source's hierarchy. Only current + future
+ * instances are removed; past instances stay so achievement history is intact.
+ * Drizzle FK cascade handles goal_progress + goal_checklist.
+ */
+export async function deleteGoalCascade(id: string): Promise<void> {
+  if (!id) throw new Error("id is required");
+  const source = await findGoalById(id);
+  if (!source) throw new Error("Goal not found");
+  const root = await findRoot(source.id);
+  if (!root) throw new Error("Goal root not found");
+  const tree = await loadTree(root.id);
+  if (!tree) return;
+  const today = todayLocal();
+  const toDelete = flattenTree(tree)
+    .filter((n) => isFutureOrCurrent(n, today))
+    .map((n) => n.id);
+  if (toDelete.length === 0) return;
+  await db.delete(goals).where(inArray(goals.id, toDelete));
+  revalidateGoals();
+  revalidatePath("/habits", "layout");
+  revalidatePath("/journal", "layout");
 }
 
 export async function setGoalPinned(input: { id: string; pinned: boolean }): Promise<void> {

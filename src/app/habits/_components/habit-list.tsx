@@ -1,7 +1,30 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { MoreHorizontal, Pencil, Archive, RotateCcw } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import {
+  MoreHorizontal,
+  Pencil,
+  Archive,
+  RotateCcw,
+  GripVertical,
+} from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +35,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
-import { archiveHabit, unarchiveHabit } from "@/app/actions/habits";
+import { archiveHabit, reorderHabits, unarchiveHabit } from "@/app/actions/habits";
 import type { Habit } from "@/db/queries/habits";
 import { TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
@@ -29,7 +52,36 @@ export function HabitList({
 }) {
   const [editing, setEditing] = useState<Habit | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [orderedActive, setOrderedActive] = useState<Habit[]>(active);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    setOrderedActive(active);
+  }, [active]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active: a, over } = e;
+    if (!over || a.id === over.id) return;
+    const oldIndex = orderedActive.findIndex((h) => h.id === a.id);
+    const newIndex = orderedActive.findIndex((h) => h.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(orderedActive, oldIndex, newIndex);
+    const previous = orderedActive;
+    setOrderedActive(next);
+    startTransition(async () => {
+      try {
+        await reorderHabits(next.map((h) => h.id));
+      } catch (err) {
+        setOrderedActive(previous);
+        toast.error(err instanceof Error ? err.message : "Failed to reorder");
+      }
+    });
+  }
 
   return (
     <Card>
@@ -48,20 +100,33 @@ export function HabitList({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
-        {active.map((h) => (
-          <Row
-            key={h.id}
-            habit={h}
-            subtitle={trackingSummary(h, categories)}
-            onEdit={() => setEditing(h)}
-            onArchive={() => {
-              startTransition(async () => {
-                await archiveHabit(h.id);
-                toast.success(`Archived “${h.name}”`);
-              });
-            }}
-          />
-        ))}
+        {orderedActive.length === 0 ? null : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={orderedActive.map((h) => h.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {orderedActive.map((h) => (
+                <SortableRow
+                  key={h.id}
+                  habit={h}
+                  subtitle={trackingSummary(h, categories)}
+                  onEdit={() => setEditing(h)}
+                  onArchive={() => {
+                    startTransition(async () => {
+                      await archiveHabit(h.id);
+                      toast.success(`Archived “${h.name}”`);
+                    });
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        )}
         {showArchived
           ? archived.map((h) => (
               <Row
@@ -103,6 +168,41 @@ function trackingSummary(habit: Habit, categories: CategoryOption[]): string {
   return `${habit.dailyTarget ?? "?"} ${cat?.name ?? "?"} sessions/day`;
 }
 
+function SortableRow({
+  habit,
+  subtitle,
+  onEdit,
+  onArchive,
+}: {
+  habit: Habit;
+  subtitle?: string;
+  onEdit: () => void;
+  onArchive: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: habit.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Row
+        habit={habit}
+        subtitle={subtitle}
+        onEdit={onEdit}
+        onArchive={onArchive}
+        dragHandleProps={{ ...attributes, ...listeners }}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
+
+type DragHandleProps = React.HTMLAttributes<HTMLButtonElement>;
+
 function Row({
   habit,
   subtitle,
@@ -111,6 +211,8 @@ function Row({
   muted = false,
   archiveLabel = "Archive",
   ArchiveIcon = Archive,
+  dragHandleProps,
+  isDragging = false,
 }: {
   habit: Habit;
   subtitle?: string;
@@ -119,14 +221,27 @@ function Row({
   muted?: boolean;
   archiveLabel?: string;
   ArchiveIcon?: typeof Archive;
+  dragHandleProps?: DragHandleProps;
+  isDragging?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-md px-2 py-2",
+        "flex items-center gap-2 rounded-md px-2 py-2",
         muted && "opacity-60",
+        isDragging && "bg-muted/40 shadow-sm",
       )}
     >
+      {dragHandleProps ? (
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          className="-ml-1 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          {...dragHandleProps}
+        >
+          <GripVertical className="size-4" />
+        </button>
+      ) : null}
       <span
         aria-hidden
         className="flex size-7 shrink-0 items-center justify-center rounded-full text-sm"

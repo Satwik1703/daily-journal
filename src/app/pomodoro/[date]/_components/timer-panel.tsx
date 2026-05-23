@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { Play, Pause, Square, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,53 @@ import { ManualSessionDialog } from "./manual-session-dialog";
 const STORAGE_KEY = "pomodoro.activeSession";
 const LAST_CATEGORY_KEY = "pomodoro.lastCategoryId";
 const LAST_DURATION_KEY = "pomodoro.lastDuration";
+const NOTIF_TAG = "pomo-completion";
+
+type TimestampTriggerCtor = new (ts: number) => object;
+type NotifOptsWithTrigger = NotificationOptions & {
+  showTrigger?: object;
+  vibrate?: number[];
+};
+type GetNotifsExtraOpts = { tag?: string; includeTriggered?: boolean };
+
+async function scheduleCompletionNotification(endsAt: number, label: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+  try {
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    const TT = (window as unknown as { TimestampTrigger?: TimestampTriggerCtor }).TimestampTrigger;
+    if (!TT) return;
+    const opts: NotifOptsWithTrigger = {
+      tag: NOTIF_TAG,
+      body: label,
+      icon: "/icon",
+      badge: "/icon",
+      vibrate: [200, 100, 200, 100, 400],
+      showTrigger: new TT(endsAt),
+    };
+    await reg.showNotification("Pomodoro complete", opts);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function cancelCompletionNotification(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const notifs = await reg.getNotifications({
+      tag: NOTIF_TAG,
+      includeTriggered: false,
+    } as GetNotifsExtraOpts);
+    for (const n of notifs) n.close();
+  } catch {
+    /* ignore */
+  }
+}
 
 type ActiveSession = {
   id: string;
@@ -86,6 +134,7 @@ export function TimerPanel({
   isToday,
   pageDate,
   initialCategoryId = null,
+  initialAutostart = false,
 }: {
   categories: PomoCategory[];
   soundId: string;
@@ -93,7 +142,11 @@ export function TimerPanel({
   pageDate: string;
   /** From `?categoryId=` URL param. Wins over the localStorage "last used" cache. */
   initialCategoryId?: string | null;
+  /** From `?autostart=1` URL param. Auto-starts a session on mount if idle + today. */
+  initialAutostart?: boolean;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   // ----- initial state from localStorage (lazy init)
   const [phase, setPhase] = useState<Phase>("idle");
   const [active, setActive] = useState<ActiveSession | null>(null);
@@ -129,6 +182,7 @@ export function TimerPanel({
       tickRef.current = null;
     }
     setPhase("idle");
+    void cancelCompletionNotification();
     try {
       stopSoundRef.current = playPomodoroSound(soundId, 5000);
     } catch {
@@ -168,7 +222,9 @@ export function TimerPanel({
   // ----- mount: hydrate from URL param > localStorage > null
   useEffect(() => {
     // Priority: URL ?categoryId= (validated server-side) > localStorage last used.
+    let resolvedCategoryId: string | null = null;
     if (initialCategoryId) {
+      resolvedCategoryId = initialCategoryId;
       setCategoryId(initialCategoryId);
       try {
         localStorage.setItem(LAST_CATEGORY_KEY, initialCategoryId);
@@ -177,27 +233,70 @@ export function TimerPanel({
       }
     } else {
       const last = localStorage.getItem(LAST_CATEGORY_KEY);
-      if (last && categories.some((c) => c.id === last)) setCategoryId(last);
+      if (last && categories.some((c) => c.id === last)) {
+        resolvedCategoryId = last;
+        setCategoryId(last);
+      }
     }
     const lastDur = localStorage.getItem(LAST_DURATION_KEY);
-    if (lastDur === "full" || lastDur === "half") setDurationKey(lastDur);
+    let resolvedDur: PomoDurationKey = DEFAULT_DURATION_KEY;
+    if (lastDur === "full" || lastDur === "half") {
+      resolvedDur = lastDur;
+      setDurationKey(lastDur);
+    }
 
     const a = loadActive();
-    if (!a) return;
-    setActive(a);
-    // Don't let a resumed session override an explicit URL categoryId.
-    if (!initialCategoryId) setCategoryId(a.categoryId);
-    setDurationKey(a.plannedMin === 30 ? "half" : "full");
+    if (a) {
+      setActive(a);
+      // Don't let a resumed session override an explicit URL categoryId.
+      if (!initialCategoryId) setCategoryId(a.categoryId);
+      setDurationKey(a.plannedMin === 30 ? "half" : "full");
 
-    const elapsed = computeElapsedMs(a, Date.now());
-    const total = a.plannedMin * 60_000;
-    if (elapsed >= total) {
-      // Already completed while away — fire completion flow once.
-      handleCompletion(a);
-    } else if (a.pauseStartedAt) {
-      setPhase("paused");
-    } else {
+      const elapsed = computeElapsedMs(a, Date.now());
+      const total = a.plannedMin * 60_000;
+      if (elapsed >= total) {
+        // Already completed while away — fire completion flow once.
+        handleCompletion(a);
+      } else if (a.pauseStartedAt) {
+        setPhase("paused");
+      } else {
+        setPhase("running");
+        // Re-arm OS notification after refresh while session still running.
+        const endsAt = a.startedAt + a.plannedMin * 60_000;
+        const cat = categories.find((c) => c.id === a.categoryId);
+        const label = cat ? `${cat.emoji ?? ""} ${cat.name} timer is up` : "Timer is up";
+        void scheduleCompletionNotification(endsAt, label.trim());
+      }
+      return;
+    }
+
+    // No active session. Try autostart from URL.
+    if (initialAutostart && isToday) {
+      const plannedMin = POMO_DURATIONS.find((d) => d.key === resolvedDur)!.min;
+      primeAudio();
+      const startedAt = Date.now();
+      const newA: ActiveSession = {
+        id: nanoid(12),
+        startedAt,
+        pausedMs: 0,
+        pauseStartedAt: null,
+        plannedMin,
+        categoryId: resolvedCategoryId,
+      };
+      saveActive(newA);
+      if (resolvedCategoryId) localStorage.setItem(LAST_CATEGORY_KEY, resolvedCategoryId);
+      localStorage.setItem(LAST_DURATION_KEY, resolvedDur);
+      completionHandledRef.current = false;
+      setActive(newA);
+      setNow(Date.now());
       setPhase("running");
+      const cat = categories.find((c) => c.id === resolvedCategoryId);
+      const label = cat ? `${cat.emoji ?? ""} ${cat.name} timer is up` : "Timer is up";
+      void scheduleCompletionNotification(startedAt + plannedMin * 60_000, label.trim());
+    }
+    // Clean autostart param off the URL so a refresh doesn't relaunch.
+    if (initialAutostart && pathname) {
+      router.replace(pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -271,6 +370,9 @@ export function TimerPanel({
     setActive(a);
     setNow(Date.now());
     setPhase("running");
+    const cat = categories.find((c) => c.id === categoryId);
+    const label = cat ? `${cat.emoji ?? ""} ${cat.name} timer is up` : "Timer is up";
+    void scheduleCompletionNotification(a.startedAt + plannedMin * 60_000, label.trim());
   }
 
   function handlePause() {
@@ -279,6 +381,7 @@ export function TimerPanel({
     saveActive(next);
     setActive(next);
     setPhase("paused");
+    void cancelCompletionNotification();
   }
 
   function handleResume() {
@@ -293,6 +396,12 @@ export function TimerPanel({
     setActive(next);
     setNow(Date.now());
     setPhase("running");
+    // Reschedule OS notification for remaining time.
+    const remaining = next.plannedMin * 60_000 - computeElapsedMs(next, Date.now());
+    const endsAt = Date.now() + Math.max(0, remaining);
+    const cat = categories.find((c) => c.id === next.categoryId);
+    const label = cat ? `${cat.emoji ?? ""} ${cat.name} timer is up` : "Timer is up";
+    void scheduleCompletionNotification(endsAt, label.trim());
   }
 
   function handleStopRequest() {
@@ -302,6 +411,7 @@ export function TimerPanel({
 
   async function discardSession() {
     if (stopSoundRef.current) stopSoundRef.current();
+    void cancelCompletionNotification();
     saveActive(null);
     setActive(null);
     setPhase("idle");
@@ -312,6 +422,7 @@ export function TimerPanel({
   async function savePartial() {
     if (!active) return;
     setStopOpen(false);
+    void cancelCompletionNotification();
     const endedAt = active.pauseStartedAt ?? Date.now();
     const elapsed = computeElapsedMs(active, endedAt);
     const durationMin = Math.max(1, Math.round(elapsed / 60_000));

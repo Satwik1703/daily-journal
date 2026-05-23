@@ -166,6 +166,27 @@ export async function updateHabit(input: {
   revalidatePath("/goals", "layout");
 }
 
+/**
+ * Persist a new ordering for habits. Array index becomes the `position` value.
+ * Validates each id is a non-empty unique string; orphaned ids no-op.
+ */
+export async function reorderHabits(orderedIds: string[]): Promise<void> {
+  if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  const seen = new Set<string>();
+  for (const id of orderedIds) {
+    if (typeof id !== "string" || !id) throw new Error("invalid id in orderedIds");
+    if (seen.has(id)) throw new Error("duplicate id in orderedIds");
+    seen.add(id);
+  }
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await tx.update(habits).set({ position: i }).where(eq(habits.id, orderedIds[i]));
+    }
+  });
+  revalidatePath("/habits", "layout");
+  revalidatePath("/goals", "layout");
+}
+
 export async function archiveHabit(id: string): Promise<void> {
   await db.update(habits).set({ archivedAt: new Date() }).where(eq(habits.id, id));
   revalidatePath("/habits");

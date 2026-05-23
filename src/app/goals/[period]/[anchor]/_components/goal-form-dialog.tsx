@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { createGoal } from "@/app/actions/goals";
+import { createGoal, updateGoalCascade } from "@/app/actions/goals";
 import {
   GOAL_TYPE_HINTS,
   GOAL_TYPE_LABELS,
@@ -41,6 +41,20 @@ const EMOJI_SUGGESTIONS = ["📚", "🏋️", "🎯", "🚀", "💪", "🧘", "�
 
 const TYPE_OPTIONS: ReadonlyArray<GoalType> = ["number", "habit", "pomodoro", "milestone"];
 
+export type GoalEditable = {
+  id: string;
+  title: string;
+  emoji: string | null;
+  color: string;
+  type: GoalType;
+  targetValue: number | null;
+  unit: string | null;
+  habitId: string | null;
+  pomoCategoryId: string | null;
+  pomoMetric: PomoMetric | null;
+  pinned: boolean;
+};
+
 export function GoalFormDialog({
   open,
   onOpenChange,
@@ -48,6 +62,7 @@ export function GoalFormDialog({
   periodKey,
   habits,
   categories,
+  goal = null,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -55,7 +70,10 @@ export function GoalFormDialog({
   periodKey: string;
   habits: HabitOption[];
   categories: CategoryOption[];
+  /** If present, dialog runs in edit mode for that goal. */
+  goal?: GoalEditable | null;
 }) {
+  const isEdit = goal != null;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState("");
@@ -85,6 +103,25 @@ export function GoalFormDialog({
   }, [period, currentYear, todayMonthKey]);
   const [repeat, setRepeat] = useState<RepeatThrough>("week");
   const [repeatMonth, setRepeatMonth] = useState<string>(futureMonthKeys[0] ?? todayMonthKey);
+
+  // Sync form to goal in edit mode whenever the dialog opens or goal changes.
+  useEffect(() => {
+    if (!open) return;
+    if (goal) {
+      setTitle(goal.title);
+      setEmoji(goal.emoji ?? "🎯");
+      setColor(goal.color);
+      setType(goal.type);
+      setTargetValue(goal.targetValue != null ? String(goal.targetValue) : "");
+      setUnit(goal.unit ?? "");
+      if (goal.habitId) setHabitId(goal.habitId);
+      setPomoCategoryId(goal.pomoCategoryId ?? "");
+      setPomoMetric(goal.pomoMetric ?? "minutes");
+      setPinned(goal.pinned === true);
+      setAutoSplit(false);
+      setRepeat("week");
+    }
+  }, [open, goal]);
 
   // Auto-disable habit/pomo types if the user has none yet.
   const habitAvailable = habits.length > 0;
@@ -161,6 +198,25 @@ export function GoalFormDialog({
     }
     startTransition(async () => {
       try {
+        if (isEdit && goal) {
+          await updateGoalCascade({
+            id: goal.id,
+            title,
+            emoji: emoji || null,
+            color,
+            targetValue: needsTarget ? targetNum : null,
+            unit: needsTarget && unit.trim() ? unit.trim() : null,
+            habitId: goal.type === "habit" ? (habitId || null) : null,
+            pomoCategoryId:
+              goal.type === "pomodoro" ? (pomoCategoryId || null) : null,
+            pomoMetric: goal.type === "pomodoro" ? pomoMetric : null,
+            pinned,
+          });
+          toast.success("Saved · current + future updated");
+          onOpenChange(false);
+          router.refresh();
+          return;
+        }
         const isReverseCascade = period === "week" && repeat !== "week" && type !== "milestone";
         await createGoal({
           period,
@@ -188,7 +244,7 @@ export function GoalFormDialog({
         onOpenChange(false);
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to add goal");
+        toast.error(err instanceof Error ? err.message : "Failed to save goal");
       }
     });
   }
@@ -197,7 +253,13 @@ export function GoalFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New goal</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit goal" : "New goal"}</DialogTitle>
+          {isEdit ? (
+            <p className="text-[11px] text-muted-foreground">
+              Edits apply to this + every current and future instance in the cascade.
+              Past instances stay as history.
+            </p>
+          ) : null}
         </DialogHeader>
 
         <div className="space-y-4">
@@ -265,37 +327,43 @@ export function GoalFormDialog({
 
           <div className="space-y-1.5">
             <Label>Type</Label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {TYPE_OPTIONS.map((t) => {
-                const available =
-                  t === "habit" ? habitAvailable : t === "pomodoro" ? pomoAvailable : true;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => available && setType(t)}
-                    disabled={!available}
-                    className={cn(
-                      "rounded-md border p-2.5 text-left transition-colors",
-                      t === type
-                        ? "border-primary bg-muted/50"
-                        : "border-input hover:bg-muted/40",
-                      !available && "cursor-not-allowed opacity-50",
-                    )}
-                  >
-                    <div className="text-sm font-medium">
-                      {GOAL_TYPE_LABELS[t]}
-                      {t === "habit" && !habitAvailable ? (
-                        <span className="ml-1 text-[10px]">(no habits yet)</span>
-                      ) : null}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {GOAL_TYPE_HINTS[t]}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {isEdit ? (
+              <p className="rounded-md border border-input bg-muted/30 p-2.5 text-xs text-muted-foreground">
+                {GOAL_TYPE_LABELS[type]} — type can&apos;t be changed after creation.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {TYPE_OPTIONS.map((t) => {
+                  const available =
+                    t === "habit" ? habitAvailable : t === "pomodoro" ? pomoAvailable : true;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => available && setType(t)}
+                      disabled={!available}
+                      className={cn(
+                        "rounded-md border p-2.5 text-left transition-colors",
+                        t === type
+                          ? "border-primary bg-muted/50"
+                          : "border-input hover:bg-muted/40",
+                        !available && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      <div className="text-sm font-medium">
+                        {GOAL_TYPE_LABELS[t]}
+                        {t === "habit" && !habitAvailable ? (
+                          <span className="ml-1 text-[10px]">(no habits yet)</span>
+                        ) : null}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {GOAL_TYPE_HINTS[t]}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {type === "number" ? (
@@ -403,7 +471,7 @@ export function GoalFormDialog({
             </p>
           ) : null}
 
-          {period !== "week" && type !== "milestone" ? (
+          {!isEdit && period !== "week" && type !== "milestone" ? (
             <div className="rounded-md border border-dashed border-input bg-muted/20 p-3 space-y-2">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -422,7 +490,7 @@ export function GoalFormDialog({
             </div>
           ) : null}
 
-          {period === "week" && type !== "milestone" ? (
+          {!isEdit && period === "week" && type !== "milestone" ? (
             <div className="rounded-md border border-dashed border-input bg-muted/20 p-3 space-y-2">
               <Label>Repeat through</Label>
               <div className="space-y-1.5 text-sm">
@@ -488,7 +556,7 @@ export function GoalFormDialog({
               Cancel
             </Button>
             <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : "Save goal"}
+              {pending ? "Saving…" : isEdit ? "Save changes" : "Save goal"}
             </Button>
           </div>
         </div>

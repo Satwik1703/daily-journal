@@ -86,6 +86,19 @@ export default async function GoalsPage({
         )
       : {};
 
+  const mappedHabitOptions = habitOptions.map((h) => ({
+    id: h.id,
+    name: h.name,
+    emoji: h.emoji,
+    color: h.color,
+  }));
+  const mappedCategoryOptions = pomoCategories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    emoji: c.emoji,
+    color: c.color,
+  }));
+
   const goalsNeedingReflection = goalsForPeriod.filter(
     (g) => g.finalizedAt != null && g.reflectionSavedAt == null && g.status !== "archived",
   );
@@ -111,8 +124,8 @@ export default async function GoalsPage({
           period={period}
           periodKey={anchor}
           disabled={isPast}
-          habits={habitOptions.map((h) => ({ id: h.id, name: h.name, emoji: h.emoji, color: h.color }))}
-          categories={pomoCategories.map((c) => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color }))}
+          habits={mappedHabitOptions}
+          categories={mappedCategoryOptions}
         />
       </div>
 
@@ -139,11 +152,15 @@ export default async function GoalsPage({
             <div key={goal.id} className="space-y-0">
               <GoalCard
                 goal={goal}
+                period={period}
+                periodKey={anchor}
                 periodStart={start}
                 periodEnd={end}
                 today={today}
                 habits={habitOptions}
                 categories={pomoCategories}
+                habitOptions={mappedHabitOptions}
+                categoryOptions={mappedCategoryOptions}
               />
               {children.length > 0 ? (
                 <CascadeChildren items={children} today={today} />

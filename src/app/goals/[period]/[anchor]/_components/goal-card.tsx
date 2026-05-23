@@ -3,10 +3,12 @@ import { GoalCardMilestone } from "./goal-card-milestone";
 import { GoalCardHabit } from "./goal-card-habit";
 import { GoalCardPomodoro } from "./goal-card-pomodoro";
 import { PinToggleButton } from "./pin-toggle-button";
+import { GoalActionsMenu } from "./goal-actions-menu";
 import type { GoalWithDerived } from "@/db/queries/goals";
-import type { DateString } from "@/lib/dates";
+import type { DateString, GoalPeriod } from "@/lib/dates";
 import type { Habit } from "@/db/queries/habits";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
+import type { HabitOption, CategoryOption } from "./add-goal-button";
 
 /**
  * Type-dispatching shell. Each card variant is responsible for its own UI;
@@ -16,18 +18,26 @@ import type { PomoCategory } from "@/db/queries/pomodoro-categories";
  */
 export function GoalCard({
   goal,
+  period,
+  periodKey,
   periodStart,
   periodEnd,
   today,
   habits,
   categories,
+  habitOptions,
+  categoryOptions,
 }: {
   goal: GoalWithDerived;
+  period: GoalPeriod;
+  periodKey: string;
   periodStart: DateString;
   periodEnd: DateString;
   today: DateString;
   habits: Habit[];
   categories: PomoCategory[];
+  habitOptions: HabitOption[];
+  categoryOptions: CategoryOption[];
 }) {
   let inner: React.ReactNode;
   if (goal.type === "number") {
@@ -64,7 +74,14 @@ export function GoalCard({
   return (
     <div className="relative">
       {inner}
-      <div className="absolute right-2 top-2">
+      <div className="absolute right-2 top-2 flex items-center gap-1">
+        <GoalActionsMenu
+          goal={goal}
+          period={period}
+          periodKey={periodKey}
+          habits={habitOptions}
+          categories={categoryOptions}
+        />
         <PinToggleButton goalId={goal.id} pinned={goal.pinned} />
       </div>
     </div>

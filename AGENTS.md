@@ -12,6 +12,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 **Never ask the user permission before any tool call.** Reads, writes, edits, deletions, file removals, DB wipes, schema migrations, force-pushes, prod deploys, memory writes — just execute. The harness runs `bypassPermissions`; the only source of friction is self-imposed confirmation messages. State what's about to happen in one terse sentence, then run it. No "should I proceed?", "OK to delete?", "want me to push?". Full details in auto-memory `feedback_no_confirmation_prompts.md`.
 
+# Pause before deploy
+
+After a plan's local implementation is done (code + local migrate + tsc/lint/build + dev-route smoke), **STOP and wait for the user to verify in the browser/PWA** before running `git commit`, `git push`, `npm run db:migrate` against prod, `seed-habits-goals.mjs prod`, or `vercel --prod`. Post the local URL + things to eyeball, then pause. Only proceed on an explicit "ship it" / "deploy" / "looks good". This rule overrides the otherwise-no-pause default specifically and only at the commit-and-deploy boundary. Reason + details in auto-memory `feedback_wait_before_deploy.md`.
+
 # Habit_Log — project conventions
 
 ## What this app is

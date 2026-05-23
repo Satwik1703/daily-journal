@@ -15,8 +15,8 @@ export function CategoryPicker({
   disabled?: boolean;
 }) {
   return (
-    <div className="-mx-1 w-full max-w-full min-w-0 overflow-x-auto pb-1">
-      <div className="flex w-max gap-1.5 px-1">
+    <div className="w-full">
+      <div className="flex flex-wrap gap-1.5">
         {categories.map((c) => {
           const active = c.id === selectedId;
           return (

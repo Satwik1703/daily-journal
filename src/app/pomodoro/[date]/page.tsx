@@ -16,10 +16,10 @@ export default async function PomodoroDatePage({
   searchParams,
 }: {
   params: Promise<{ date: string }>;
-  searchParams: Promise<{ categoryId?: string }>;
+  searchParams: Promise<{ categoryId?: string; autostart?: string }>;
 }) {
   const { date } = await params;
-  const { categoryId: requestedCategoryId } = await searchParams;
+  const { categoryId: requestedCategoryId, autostart } = await searchParams;
   if (date === "today") redirect(`/pomodoro/${todayLocal()}`);
   if (!isValidDateString(date)) notFound();
 
@@ -62,6 +62,7 @@ export default async function PomodoroDatePage({
             isToday={isToday}
             pageDate={date}
             initialCategoryId={initialCategoryId}
+            initialAutostart={autostart === "1"}
           />
         </CardContent>
       </Card>

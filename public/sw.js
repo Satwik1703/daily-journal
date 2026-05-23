@@ -1,6 +1,6 @@
 // Habit Log service worker.
 // Bump VERSION on every deploy or you'll see stale shells on phones.
-const VERSION = "habit-log-v8";
+const VERSION = "habit-log-v9";
 const SHELL = ["/", "/journal", "/habits", "/pomodoro", "/goals", "/insights", "/gym", "/more", "/settings", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -17,6 +17,27 @@ self.addEventListener("activate", (event) => {
     ),
   );
   self.clients.claim();
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const c of clients) {
+        if (c.url.includes("/pomodoro") && "focus" in c) return c.focus();
+      }
+      if (clients.length > 0 && "focus" in clients[0]) {
+        try {
+          await clients[0].navigate("/pomodoro");
+          return clients[0].focus();
+        } catch (_) {
+          /* fall through to openWindow */
+        }
+      }
+      return self.clients.openWindow("/pomodoro");
+    })(),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
