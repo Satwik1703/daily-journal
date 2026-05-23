@@ -25,40 +25,41 @@ export async function setCachedPage<T>(key: string, data: T): Promise<void> {
   }
 }
 
+/**
+ * Broadcast invalidations on the cache-invalidate channel. Keys ending in
+ * `:*` are treated as prefix wildcards by useCachedPage's listener.
+ */
 export async function invalidateCache(...keys: string[]): Promise<void> {
-  for (const key of keys) {
-    try {
-      const db = await openSyncDB();
-      const row = await db.get("cache_pages", key);
-      if (row) {
-        await db.put("cache_pages", { ...row, stale: true });
-      }
-    } catch {
-      /* ignore */
-    }
+  if (typeof BroadcastChannel === "undefined") return;
+  try {
+    const ch = new BroadcastChannel(INVALIDATE_CHANNEL);
+    for (const key of keys) ch.postMessage({ key });
+    ch.close();
+  } catch {
+    /* ignore */
   }
-  if (typeof BroadcastChannel !== "undefined") {
-    try {
-      const ch = new BroadcastChannel(INVALIDATE_CHANNEL);
-      for (const key of keys) ch.postMessage({ key });
-      ch.close();
-    } catch {
-      /* ignore */
-    }
+}
+
+function matchesKey(incoming: string, ownKey: string): boolean {
+  if (incoming === ownKey) return true;
+  if (incoming.endsWith(":*")) {
+    const prefix = incoming.slice(0, -1); // strips trailing *
+    return ownKey.startsWith(prefix);
   }
+  return false;
 }
 
 /**
  * SWR-style hook backed by IndexedDB.
  *
- *   - First render returns `initialServerData` (the value the server
- *     component baked into HTML).
- *   - On mount: writes initialServerData to IDB so next session has it.
- *   - On mount + on `cache-invalidate` broadcast for this key: triggers
- *     `fetcher()` in background and swaps state when the response arrives.
- *
- * The hook never blocks the UI. If the network is down the UI keeps showing
- * whatever it had.
+ *   - First render returns `initialServerData` (often `null` for client-shell
+ *     pages that don't server-fetch).
+ *   - On mount: reads IDB cache → if present, immediately swaps state. This
+ *     is what makes page navigation feel instant on revisit.
+ *   - Always triggers `fetcher()` in background and writes the fresh result
+ *     to both state and IDB.
+ *   - Listens on `cache-invalidate` BroadcastChannel for cross-tab refresh.
+ *     Matches its own key exactly OR a `prefix:*` wildcard.
  */
 export function useCachedPage<T>(
   key: string,
@@ -70,8 +71,11 @@ export function useCachedPage<T>(
   useEffect(() => {
     let cancelled = false;
 
-    // Persist initial server snapshot.
-    void setCachedPage(key, initialServerData);
+    async function loadFromIDB() {
+      const cached = await getCachedPage<T>(key);
+      if (cancelled || cached == null) return;
+      setData(cached);
+    }
 
     async function refresh() {
       try {
@@ -80,17 +84,20 @@ export function useCachedPage<T>(
         setData(fresh);
         await setCachedPage(key, fresh);
       } catch {
-        /* ignore */
+        /* keep current */
       }
     }
 
+    void loadFromIDB();
     void refresh();
 
     let ch: BroadcastChannel | null = null;
     try {
       ch = new BroadcastChannel(INVALIDATE_CHANNEL);
       ch.onmessage = (e) => {
-        if (e.data?.key === key) void refresh();
+        const incoming = e.data?.key;
+        if (typeof incoming !== "string") return;
+        if (matchesKey(incoming, key)) void refresh();
       };
     } catch {
       /* ignore */

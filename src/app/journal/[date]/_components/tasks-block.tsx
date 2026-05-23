@@ -238,9 +238,15 @@ function MoveTaskButton({
       return;
     }
     setOpen(false);
-    onMoved();
-    void mutate("move_task", { id: taskId, newDate });
-    toast.success(`Moved to ${newDate}`);
+    const undo = onMoved();
+    mutateWithUndo(
+      "move_task",
+      { id: taskId, newDate },
+      {
+        message: `Moved to ${newDate}`,
+        onUndo: typeof undo === "function" ? (undo as () => void) : () => {},
+      },
+    );
   }
 
   return (

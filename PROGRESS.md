@@ -1106,6 +1106,70 @@ Server actions that create rows now accept optional client-provided `id`. Client
 
 ---
 
+## ✅ Phase 8C — SWR reads + instant page navs
+
+Closes the "every interaction is instant" feature. Shipped 2026-05-24.
+
+### Hot pages: server-rendered → pure client-shell w/ IDB cache
+
+All four hot routes converted to the same pattern:
+- Server component does ONLY param validation + redirect. No DB fetch.
+- Renders a `<PageClient {...args}>` client component.
+- Client component calls `useCachedPage<PageData | null>(key, null, fetcher)`:
+  - On mount: reads IDB cache. If hit, swaps state — instant render.
+  - Always triggers a background `fetch("/api/page/...")`. Updates state + IDB on success.
+  - Listens on `cache-invalidate` channel; refetches when an exact-match or `prefix:*` wildcard key broadcasts.
+- While `data == null` (no cache + first fetch in flight), shows a layout-matched skeleton.
+
+| Route | Client shell | Route handler |
+|---|---|---|
+| `/journal/[date]` | `_components/journal-page-client.tsx` | `/api/page/journal/[date]` |
+| `/pomodoro/[date]` | `_components/pomodoro-page-client.tsx` | `/api/page/pomodoro/[date]` |
+| `/habits/[date]` | `_components/habits-page-client.tsx` | `/api/page/habits/[date]` (shipped in 8B) |
+| `/goals/[period]/[anchor]` | `_components/goals-page-client.tsx` | `/api/page/goals/[period]/[anchor]` |
+
+Each handler returns the exact JSON shape the prior server component used to compute, with the Map → Record / Set → Array flattening that's already convention for RSC boundaries (rule #8). Sessions / Drizzle Date fields serialize through `NextResponse.json` as ISO strings, which the existing children handle via `new Date(s.startedAt)` so no consumer changes were needed.
+
+### `useCachedPage` upgrade
+
+- Reads IDB on mount BEFORE the background fetch returns. Previously it only persisted to IDB; now it also hydrates from IDB so navs feel instant.
+- BroadcastChannel listener supports prefix wildcards: `cacheKeysFor` in `mutate.ts` broadcasts both the exact key (e.g. `habits:2026-05-24`) and a `habits:*` wildcard. Any open page subscribing to `habits:2026-05-25` will refresh when an unrelated habit mutation happens — keeps cross-page state consistent without manual wiring.
+
+### Task move undo
+
+Last destructive mutation that lacked Undo. `move_task` now goes through `mutateWithUndo` with the local hide/restore callback returned by `onHide()`. Restores the row + its trace stub on Undo.
+
+### PWA
+
+`public/sw.js` VERSION unchanged (`habit-log-v10`) — no SW behavior change in 8C. Re-deploy still triggers a normal SW activation.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 23 warnings (all `react-hooks/set-state-in-effect`).
+- `npm run build` clean — **22 routes** (4 new `/api/page/*` route handlers).
+- Local probes: every page route + every page-handler route returns 200.
+- Manual: navigated between dates / periods on slow 3G — first visit shows skeleton briefly, subsequent visits render instantly from IDB then refresh in background.
+
+### Deploy
+
+1. Commit + push.
+2. No schema migration.
+3. `vercel --prod --yes`.
+4. PWA stays on v10.
+
+### "Every interaction is instant" — closed
+
+- **Writes**: optimistic everywhere + queue survives offline → instant ✓
+- **Reads**: page navigations resolve from IDB cache on revisit → instant ✓
+- **Cross-tab**: BroadcastChannel refresh + queue status both honored ✓
+- **Failure recovery**: Sync status panel surfaces failures; per-row retry / discard; pending count badge on bottom nav ✓
+- **Undo**: 5s sonner toast on every destructive op (session, workout, task delete, task move, goal delete) ✓
+
+**Resume here for next session:** instant-UI feature is complete end-to-end. Older phase deferrals (drag-reorder tasks, partial-fill grid cells, 3D avatar, AI reflections, export/import, FTS search) untouched — pick from those when there's appetite.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
