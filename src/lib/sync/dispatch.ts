@@ -54,7 +54,29 @@ import {
   deleteChecklistItem,
   saveReflection,
 } from "@/app/actions/goals";
-import { createWorkout, deleteWorkout } from "@/app/actions/gym";
+import {
+  createSplit,
+  updateSplit,
+  archiveSplit,
+  unarchiveSplit,
+  deleteSplit,
+  reorderSplits,
+  createExercise,
+  updateExercise,
+  archiveExercise,
+  unarchiveExercise,
+  deleteExercise,
+  reorderExercises,
+  assignExerciseToSplit,
+  removeExerciseFromSplit,
+  reorderSplitExercises,
+  startOrGetWorkout,
+  updateWorkout,
+  deleteWorkout,
+  logSet,
+  updateSet,
+  deleteSet,
+} from "@/app/actions/gym";
 
 type AnyAction = (input: never) => Promise<unknown>;
 
@@ -115,9 +137,32 @@ export const DISPATCH: Record<string, AnyAction> = {
   delete_checklist_item: (args: { id: string }) => deleteChecklistItem(args.id),
   save_reflection: saveReflection,
 
-  // gym
-  create_workout: createWorkout,
+  // gym (Phase 9)
+  create_split: createSplit,
+  update_split: updateSplit,
+  archive_split: (args: { id: string }) => archiveSplit(args.id),
+  unarchive_split: (args: { id: string }) => unarchiveSplit(args.id),
+  delete_split: (args: { id: string }) => deleteSplit(args.id),
+  reorder_splits: (args: { orderedIds: string[] }) => reorderSplits(args.orderedIds),
+
+  create_exercise: createExercise,
+  update_exercise: updateExercise,
+  archive_exercise: (args: { id: string }) => archiveExercise(args.id),
+  unarchive_exercise: (args: { id: string }) => unarchiveExercise(args.id),
+  delete_exercise: (args: { id: string }) => deleteExercise(args.id),
+  reorder_exercises: (args: { orderedIds: string[] }) => reorderExercises(args.orderedIds),
+
+  assign_exercise_to_split: assignExerciseToSplit,
+  remove_exercise_from_split: removeExerciseFromSplit,
+  reorder_split_exercises: reorderSplitExercises,
+
+  start_workout: startOrGetWorkout,
+  update_workout: updateWorkout,
   delete_workout: (args: { id: string }) => deleteWorkout(args.id),
+
+  log_set: logSet,
+  update_set: updateSet,
+  delete_set: (args: { id: string }) => deleteSet(args.id),
 };
 
 export type MutationKind = keyof typeof DISPATCH;

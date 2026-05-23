@@ -126,13 +126,63 @@ export const habitLogs = sqliteTable(
   ],
 );
 
-// ---------- Gym ----------
+// ---------- Gym (Phase 9 rewamp) ----------
+
+export const splits = sqliteTable("splits", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  emoji: text("emoji"),
+  color: text("color").notNull().default("#10b981"),
+  position: integer("position").notNull().default(0),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const exercises = sqliteTable("exercises", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  emoji: text("emoji"),
+  color: text("color").notNull().default("#10b981"),
+  // JSON array of MuscleGroup ids (e.g. ["chest", "front_delts", "triceps"]).
+  muscleGroups: text("muscle_groups", { mode: "json" })
+    .$type<string[]>()
+    .notNull(),
+  notes: text("notes"),
+  // True for single-arm/leg loads (dumbbell curl, single-arm row): weight is
+  // logged per-hand and displayed with an "each" badge so future logs match.
+  perHand: integer("per_hand", { mode: "boolean" }).notNull().default(false),
+  position: integer("position").notNull().default(0),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const splitExercises = sqliteTable(
+  "split_exercises",
+  {
+    splitId: text("split_id")
+      .notNull()
+      .references(() => splits.id, { onDelete: "cascade" }),
+    exerciseId: text("exercise_id")
+      .notNull()
+      .references(() => exercises.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.splitId, t.exerciseId] }),
+    index("split_exercises_split").on(t.splitId),
+  ],
+);
 
 export const workouts = sqliteTable(
   "workouts",
   {
     id: text("id").primaryKey(),
     date: text("date").notNull(),
+    splitId: text("split_id").references(() => splits.id, { onDelete: "set null" }),
     notes: text("notes"),
     durationMin: integer("duration_min"),
     createdAt: integer("created_at", { mode: "timestamp" })
@@ -142,19 +192,30 @@ export const workouts = sqliteTable(
   (t) => [index("workouts_date").on(t.date)],
 );
 
-export const muscleLogs = sqliteTable(
-  "muscle_logs",
+export const workoutSets = sqliteTable(
+  "workout_sets",
   {
     id: text("id").primaryKey(),
     workoutId: text("workout_id")
       .notNull()
       .references(() => workouts.id, { onDelete: "cascade" }),
-    muscle: text("muscle").notNull(),
-    intensity: text("intensity", { enum: ["light", "medium", "heavy"] }).notNull(),
+    exerciseId: text("exercise_id")
+      .notNull()
+      .references(() => exercises.id, { onDelete: "restrict" }),
+    setNumber: integer("set_number").notNull(),
+    reps: integer("reps"),
+    weightKg: real("weight_kg"),
+    rpe: real("rpe"),
+    isWarmup: integer("is_warmup", { mode: "boolean" }).notNull().default(false),
+    note: text("note"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
   },
   (t) => [
-    index("muscle_logs_workout").on(t.workoutId),
-    index("muscle_logs_muscle").on(t.muscle),
+    index("workout_sets_workout").on(t.workoutId),
+    index("workout_sets_exercise").on(t.exerciseId),
+    index("workout_sets_exercise_created").on(t.exerciseId, t.createdAt),
   ],
 );
 

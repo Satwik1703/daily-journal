@@ -4,6 +4,11 @@ import {
   getArchivedCategories,
 } from "@/db/queries/pomodoro-categories";
 import { getPomodoroSoundId } from "@/db/queries/settings";
+import {
+  getSplits,
+  getExercises,
+  getSplitExercises,
+} from "@/db/queries/gym";
 
 export const dynamic = "force-dynamic";
 
@@ -11,16 +16,30 @@ import { QuestionsManager } from "./_components/questions-manager";
 import { PomodoroCategoriesManager } from "./_components/pomodoro-categories-manager";
 import { SoundPicker } from "./_components/sound-picker";
 import { SyncStatusPanel } from "./_components/sync-status-panel";
+import { SplitsManager } from "./_components/splits-manager";
+import { ExercisesManager } from "./_components/exercises-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
 export default async function SettingsPage() {
-  const [active, archived, pomoActive, pomoArchived, soundId] = await Promise.all([
+  const [
+    active,
+    archived,
+    pomoActive,
+    pomoArchived,
+    soundId,
+    splits,
+    exercises,
+    joins,
+  ] = await Promise.all([
     getActiveQuestions(),
     getArchivedQuestions(),
     getActiveCategories(),
     getArchivedCategories(),
     getPomodoroSoundId(),
+    getSplits(true),
+    getExercises(true),
+    getSplitExercises(),
   ]);
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
@@ -34,6 +53,10 @@ export default async function SettingsPage() {
       <QuestionsManager active={active} archived={archived} />
 
       <PomodoroCategoriesManager active={pomoActive} archived={pomoArchived} />
+
+      <SplitsManager splits={splits} exercises={exercises} joins={joins} />
+
+      <ExercisesManager exercises={exercises} />
 
       <SoundPicker currentSoundId={soundId} />
 

@@ -46,7 +46,38 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("pomodoro:*");
   }
   if (kind === "set_pomo_sound") keys.push("settings");
-  if (kind === "create_workout" || kind === "delete_workout") keys.push("gym");
+  if (
+    kind === "start_workout" ||
+    kind === "update_workout" ||
+    kind === "delete_workout" ||
+    kind === "log_set" ||
+    kind === "update_set" ||
+    kind === "delete_set"
+  ) {
+    if (a.date) keys.push(`gym:${a.date}`);
+    keys.push("gym:*");
+  }
+  if (
+    kind === "create_split" ||
+    kind === "update_split" ||
+    kind === "archive_split" ||
+    kind === "unarchive_split" ||
+    kind === "delete_split" ||
+    kind === "reorder_splits" ||
+    kind === "create_exercise" ||
+    kind === "update_exercise" ||
+    kind === "archive_exercise" ||
+    kind === "unarchive_exercise" ||
+    kind === "delete_exercise" ||
+    kind === "reorder_exercises" ||
+    kind === "assign_exercise_to_split" ||
+    kind === "remove_exercise_from_split" ||
+    kind === "reorder_split_exercises"
+  ) {
+    keys.push("gym:*");
+    keys.push("gym-library");
+    keys.push("settings");
+  }
   return keys;
 }
 
