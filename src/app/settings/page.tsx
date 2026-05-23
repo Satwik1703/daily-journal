@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 import { QuestionsManager } from "./_components/questions-manager";
 import { PomodoroCategoriesManager } from "./_components/pomodoro-categories-manager";
 import { SoundPicker } from "./_components/sound-picker";
+import { SyncStatusPanel } from "./_components/sync-status-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -27,6 +28,8 @@ export default async function SettingsPage() {
         <h1 className="font-serif text-2xl font-normal leading-tight">Settings</h1>
         <p className="text-xs text-muted-foreground">Customize what you track each day.</p>
       </div>
+
+      <SyncStatusPanel />
 
       <QuestionsManager active={active} archived={archived} />
 

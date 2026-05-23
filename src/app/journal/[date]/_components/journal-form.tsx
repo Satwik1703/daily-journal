@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { saveJournalEntry, type JournalPatch } from "@/app/actions/journal";
+import { type JournalPatch } from "@/app/actions/journal";
+import { mutate } from "@/lib/sync/mutate";
 import { QuestionsBlock } from "./questions-block";
 import type { JournalQuestion } from "@/db/queries/journal-questions";
 import { cn } from "@/lib/utils";
@@ -53,7 +54,6 @@ export function JournalForm({
   tasksBlock?: React.ReactNode;
 }) {
   const [state, setState] = useState<JournalFormState>(initial);
-  const [isPending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [savedAgo, setSavedAgo] = useState<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,10 +86,8 @@ export function JournalForm({
     pendingScalarsRef.current = {};
     answersDirtyRef.current = false;
     if (Object.keys(patch).length <= 1) return;
-    startTransition(async () => {
-      await saveJournalEntry(patch);
-      setSavedAt(Date.now());
-    });
+    void mutate("save_journal_entry", patch);
+    setSavedAt(Date.now());
   }
 
   function scheduleFlush() {
@@ -129,7 +127,7 @@ export function JournalForm({
 
   return (
     <div className="space-y-4">
-      <SaveIndicator pending={isPending} savedAgo={savedAgo} hasAnythingSaved={savedAt !== null} />
+      <SaveIndicator pending={false} savedAgo={savedAgo} hasAnythingSaved={savedAt !== null} />
 
       {/* Group 1 — Mindset */}
       <section className="space-y-4">

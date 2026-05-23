@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Lora } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { BottomNav } from "@/components/bottom-nav";
+import { SyncBootstrap } from "@/components/sync-bootstrap";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -58,6 +59,7 @@ export default function RootLayout({
             {children}
           </main>
           <BottomNav />
+          <SyncBootstrap />
           <Toaster position="top-center" richColors />
         </ThemeProvider>
         <Script id="register-sw" strategy="afterInteractive">

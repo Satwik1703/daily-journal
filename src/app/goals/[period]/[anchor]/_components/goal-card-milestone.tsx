@@ -1,17 +1,14 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
+import { startTransition, useOptimistic, useState } from "react";
+import { nanoid } from "nanoid";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
-import {
-  addChecklistItem,
-  deleteChecklistItem,
-  toggleChecklistItem,
-} from "@/app/actions/goals";
+import { mutate } from "@/lib/sync/mutate";
 import {
   PACE_PILL_LABELS,
   computeGoalPace,
@@ -38,7 +35,6 @@ export function GoalCardMilestone({
     items,
     (state: GoalChecklistItem[], action: Action) => reduce(state, action),
   );
-  const [pendingMutation, startTransition] = useTransition();
   const [newText, setNewText] = useState("");
 
   const totalCount = optimisticItems.length;
@@ -58,49 +54,37 @@ export function GoalCardMilestone({
   const filled = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
 
   function toggle(item: GoalChecklistItem) {
-    startTransition(async () => {
+    startTransition(() => {
       applyOptimistic({ kind: "toggle", id: item.id });
-      try {
-        const { done } = await toggleChecklistItem(item.id);
-        setItems((arr) => arr.map((i) => (i.id === item.id ? { ...i, done } : i)));
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to toggle");
-      }
     });
+    setItems((arr) => arr.map((i) => (i.id === item.id ? { ...i, done: !i.done } : i)));
+    void mutate("toggle_checklist_item", { itemId: item.id });
   }
 
   function add() {
     const text = newText.trim();
     if (!text) return;
-    const tempId = `tmp-${Date.now()}`;
-    startTransition(async () => {
+    const id = nanoid(12);
+    startTransition(() => {
       applyOptimistic({
         kind: "add",
-        item: { id: tempId, goalId: goal.id, text, done: false, position: 0 },
+        item: { id, goalId: goal.id, text, done: false, position: 0 },
       });
-      try {
-        const { id } = await addChecklistItem({ goalId: goal.id, text });
-        setItems((arr) => [
-          ...arr,
-          { id, goalId: goal.id, text, done: false, position: arr.length },
-        ]);
-        setNewText("");
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to add item");
-      }
     });
+    setItems((arr) => [
+      ...arr,
+      { id, goalId: goal.id, text, done: false, position: arr.length },
+    ]);
+    void mutate("add_checklist_item", { id, goalId: goal.id, text });
+    setNewText("");
   }
 
   function remove(id: string) {
-    startTransition(async () => {
+    startTransition(() => {
       applyOptimistic({ kind: "delete", id });
-      try {
-        await deleteChecklistItem(id);
-        setItems((arr) => arr.filter((i) => i.id !== id));
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete");
-      }
     });
+    setItems((arr) => arr.filter((i) => i.id !== id));
+    void mutate("delete_checklist_item", { id });
   }
 
   return (
@@ -146,7 +130,6 @@ export function GoalCardMilestone({
                 type="button"
                 onClick={() => toggle(item)}
                 aria-pressed={item.done}
-                disabled={pendingMutation && item.id.startsWith("tmp-")}
                 className={
                   "grid size-5 shrink-0 place-items-center rounded border transition-colors " +
                   (item.done
@@ -194,7 +177,7 @@ export function GoalCardMilestone({
               variant="outline"
               size="icon"
               onClick={add}
-              disabled={!newText.trim() || pendingMutation}
+              disabled={!newText.trim()}
               aria-label="Add sub-task"
             >
               <Plus className="size-4" />

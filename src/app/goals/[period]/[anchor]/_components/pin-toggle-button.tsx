@@ -1,14 +1,15 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState } from "react";
 import { Pin, PinOff } from "lucide-react";
 import { toast } from "sonner";
-import { setGoalPinned } from "@/app/actions/goals";
+import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
 
 /**
  * Tiny floating pin/unpin button rendered in the corner of every goal card.
  * Moves the goal between the "Important" top section and the main list.
+ * Optimistic: flips local state immediately + queues server mutation.
  */
 export function PinToggleButton({
   goalId,
@@ -17,30 +18,24 @@ export function PinToggleButton({
   goalId: string;
   pinned: boolean;
 }) {
-  const [pending, startTransition] = useTransition();
-  const Icon = pinned ? PinOff : Pin;
+  const [optimisticPinned, setOptimisticPinned] = useState(pinned);
+  const Icon = optimisticPinned ? PinOff : Pin;
   return (
     <button
       type="button"
-      aria-label={pinned ? "Unpin from Important" : "Pin to Important"}
-      title={pinned ? "Unpin from Important" : "Pin to Important"}
-      disabled={pending}
+      aria-label={optimisticPinned ? "Unpin from Important" : "Pin to Important"}
+      title={optimisticPinned ? "Unpin from Important" : "Pin to Important"}
       onClick={() => {
-        startTransition(async () => {
-          try {
-            await setGoalPinned({ id: goalId, pinned: !pinned });
-            toast.success(pinned ? "Unpinned" : "Pinned to Important");
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to pin");
-          }
-        });
+        const next = !optimisticPinned;
+        setOptimisticPinned(next);
+        void mutate("set_goal_pinned", { id: goalId, pinned: next });
+        toast.success(next ? "Pinned to Important" : "Unpinned");
       }}
       className={cn(
         "grid size-7 place-items-center rounded-full transition-colors",
-        pinned
+        optimisticPinned
           ? "bg-primary/15 text-primary hover:bg-primary/25"
           : "text-muted-foreground/60 hover:bg-muted hover:text-foreground",
-        pending && "opacity-50",
       )}
     >
       <Icon className="size-3.5" />

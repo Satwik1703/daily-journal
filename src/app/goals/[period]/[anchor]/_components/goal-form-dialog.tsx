@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { createGoal, updateGoalCascade } from "@/app/actions/goals";
+import { mutate } from "@/lib/sync/mutate";
 import {
   GOAL_TYPE_HINTS,
   GOAL_TYPE_LABELS,
@@ -74,8 +74,6 @@ export function GoalFormDialog({
   goal?: GoalEditable | null;
 }) {
   const isEdit = goal != null;
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState("");
   const [emoji, setEmoji] = useState<string>("🎯");
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
@@ -196,57 +194,49 @@ export function GoalFormDialog({
       toast.error("Pick a habit to link");
       return;
     }
-    startTransition(async () => {
-      try {
-        if (isEdit && goal) {
-          await updateGoalCascade({
-            id: goal.id,
-            title,
-            emoji: emoji || null,
-            color,
-            targetValue: needsTarget ? targetNum : null,
-            unit: needsTarget && unit.trim() ? unit.trim() : null,
-            habitId: goal.type === "habit" ? (habitId || null) : null,
-            pomoCategoryId:
-              goal.type === "pomodoro" ? (pomoCategoryId || null) : null,
-            pomoMetric: goal.type === "pomodoro" ? pomoMetric : null,
-            pinned,
-          });
-          toast.success("Saved · current + future updated");
-          onOpenChange(false);
-          router.refresh();
-          return;
-        }
-        const isReverseCascade = period === "week" && repeat !== "week" && type !== "milestone";
-        await createGoal({
-          period,
-          periodKey,
-          title,
-          type,
-          emoji,
-          color,
-          targetValue: needsTarget ? targetNum : null,
-          unit: needsTarget && unit.trim() ? unit.trim() : null,
-          habitId: type === "habit" ? habitId : null,
-          pomoCategoryId: type === "pomodoro" && pomoCategoryId ? pomoCategoryId : null,
-          pomoMetric: type === "pomodoro" ? pomoMetric : null,
-          autoSplitChildren: autoSplit && period !== "week" && needsTarget,
-          pinned,
-          repeat: isReverseCascade
-            ? {
-                through: repeat as "endOfMonth" | "endOfYear",
-                monthKey: repeat === "endOfMonth" ? repeatMonth : undefined,
-              }
-            : undefined,
-        });
-        toast.success("Goal added");
-        reset();
-        onOpenChange(false);
-        router.refresh();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save goal");
-      }
+    if (isEdit && goal) {
+      void mutate("update_goal_cascade", {
+        id: goal.id,
+        title,
+        emoji: emoji || null,
+        color,
+        targetValue: needsTarget ? targetNum : null,
+        unit: needsTarget && unit.trim() ? unit.trim() : null,
+        habitId: goal.type === "habit" ? (habitId || null) : null,
+        pomoCategoryId: goal.type === "pomodoro" ? (pomoCategoryId || null) : null,
+        pomoMetric: goal.type === "pomodoro" ? pomoMetric : null,
+        pinned,
+      });
+      toast.success("Saved · current + future updated");
+      onOpenChange(false);
+      return;
+    }
+    const isReverseCascade = period === "week" && repeat !== "week" && type !== "milestone";
+    void mutate("create_goal", {
+      id: nanoid(12),
+      period,
+      periodKey,
+      title,
+      type,
+      emoji,
+      color,
+      targetValue: needsTarget ? targetNum : null,
+      unit: needsTarget && unit.trim() ? unit.trim() : null,
+      habitId: type === "habit" ? habitId : null,
+      pomoCategoryId: type === "pomodoro" && pomoCategoryId ? pomoCategoryId : null,
+      pomoMetric: type === "pomodoro" ? pomoMetric : null,
+      autoSplitChildren: autoSplit && period !== "week" && needsTarget,
+      pinned,
+      repeat: isReverseCascade
+        ? {
+            through: repeat as "endOfMonth" | "endOfYear",
+            monthKey: repeat === "endOfMonth" ? repeatMonth : undefined,
+          }
+        : undefined,
     });
+    toast.success("Goal added");
+    reset();
+    onOpenChange(false);
   }
 
   return (
@@ -552,11 +542,11 @@ export function GoalFormDialog({
           ) : null}
 
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : isEdit ? "Save changes" : "Save goal"}
+            <Button onClick={submit}>
+              {isEdit ? "Save changes" : "Save goal"}
             </Button>
           </div>
         </div>

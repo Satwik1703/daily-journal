@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
+import { nanoid } from "nanoid";
 import {
   Dialog,
   DialogClose,
@@ -23,7 +24,7 @@ import {
 } from "@/lib/pomodoro-meta";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
 import { CategoryPicker } from "./category-picker";
-import { createSession } from "@/app/actions/pomodoro";
+import { mutate } from "@/lib/sync/mutate";
 
 const MAX_POMOS = 10;
 
@@ -46,7 +47,6 @@ export function ManualSessionDialog({
   const [pomoKind, setPomoKind] = useState<PomoDurationKey>("full");
   const [categoryId, setCategoryId] = useState<string | null>(defaultCategoryId);
   const [description, setDescription] = useState<string>("");
-  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     if (!open) return;
@@ -87,43 +87,28 @@ export function ManualSessionDialog({
     const baseMs = new Date(y, mo - 1, da, h, m, 0, 0).getTime();
     const desc = description.trim() || null;
 
-    startTransition(async () => {
-      let saved = 0;
-      for (let i = 0; i < pomoCount; i++) {
-        const startedAt = baseMs + i * kindMin * 60_000;
-        const endedAt = startedAt + kindMin * 60_000;
-        // Re-derive date from startedAt so sessions that cross midnight
-        // land in the right `date` bucket.
-        const sessionDate = formatLocalYMD(new Date(startedAt));
-        try {
-          await createSession({
-            date: sessionDate,
-            startedAt,
-            endedAt,
-            durationMin: kindMin,
-            plannedMin: kindMin,
-            categoryId,
-            description: desc,
-            source: "manual",
-          });
-          saved++;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Save failed";
-          if (saved === 0) {
-            toast.error(msg);
-          } else {
-            toast.warning(`Saved ${saved} of ${pomoCount} — ${msg}`);
-          }
-          return;
-        }
-      }
-      toast.success(
-        pomoCount === 1
-          ? `Logged ${kindMin}m`
-          : `Logged ${pomoCount} pomos · ${fmtMinutes(totalMin)} total`,
-      );
-      onOpenChange(false);
-    });
+    for (let i = 0; i < pomoCount; i++) {
+      const startedAt = baseMs + i * kindMin * 60_000;
+      const endedAt = startedAt + kindMin * 60_000;
+      const sessionDate = formatLocalYMD(new Date(startedAt));
+      void mutate("create_session", {
+        id: nanoid(12),
+        date: sessionDate,
+        startedAt,
+        endedAt,
+        durationMin: kindMin,
+        plannedMin: kindMin,
+        categoryId,
+        description: desc,
+        source: "manual",
+      });
+    }
+    toast.success(
+      pomoCount === 1
+        ? `Logged ${kindMin}m`
+        : `Logged ${pomoCount} pomos · ${fmtMinutes(totalMin)} total`,
+    );
+    onOpenChange(false);
   }
 
   return (
@@ -232,12 +217,8 @@ export function ManualSessionDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button type="submit" disabled={pending}>
-              {pending
-                ? "Saving…"
-                : pomoCount === 1
-                  ? "Add"
-                  : `Add ${pomoCount} pomos`}
+            <Button type="submit">
+              {pomoCount === 1 ? "Add" : `Add ${pomoCount} pomos`}
             </Button>
           </DialogFooter>
         </form>

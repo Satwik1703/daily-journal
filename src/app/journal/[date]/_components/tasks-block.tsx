@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
+import { nanoid } from "nanoid";
 import TextareaAutosize from "react-textarea-autosize";
 import { Plus, Trash2, Check, CalendarArrowUp } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { addTask, deleteTask, moveJournalTask, toggleTask, updateTaskText } from "@/app/actions/journal-tasks";
+import { mutate } from "@/lib/sync/mutate";
 import { TASK_KIND_HINTS, TASK_KIND_LABELS, TASK_KINDS, isTraceTask, type TaskKind } from "@/lib/task-meta";
 import { addDays, shiftMonth, todayLocal, type DateString } from "@/lib/dates";
 import type { JournalTask } from "@/db/queries/journal-tasks";
@@ -25,8 +26,42 @@ export function TasksBlock({ date, tasks }: { date: string; tasks: JournalTask[]
 }
 
 function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: JournalTask[] }) {
-  const [, startTransition] = useTransition();
   const [adding, setAdding] = useState(false);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [optimisticAdded, setOptimisticAdded] = useState<JournalTask[]>([]);
+  const visibleServer = tasks.filter((t) => !hiddenIds.has(t.id));
+  // Filter duplicates: server may already include the optimistic row.
+  const visibleAdded = optimisticAdded.filter((t) => !tasks.some((s) => s.id === t.id));
+  const visible = [...visibleServer, ...visibleAdded];
+
+  function handleAdd(text: string) {
+    if (!text.trim()) {
+      setAdding(false);
+      return;
+    }
+    const id = nanoid(12);
+    const newTask: JournalTask = {
+      id,
+      date,
+      kind,
+      text,
+      done: false,
+      position: tasks.length + optimisticAdded.length,
+    };
+    setOptimisticAdded((arr) => [...arr, newTask]);
+    void mutate("add_task", { id, date, kind, text });
+    setAdding(false);
+  }
+
+  function handleHide(id: string) {
+    setHiddenIds((s) => {
+      const next = new Set(s);
+      next.add(id);
+      return next;
+    });
+    setOptimisticAdded((arr) => arr.filter((t) => t.id !== id));
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -48,36 +83,25 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-1">
-        {tasks.length === 0 && !adding ? (
+        {visible.length === 0 && !adding ? (
           <p className="text-xs text-muted-foreground/70 italic">Tap + to add</p>
         ) : null}
-        {tasks.map((t) => (
-          <TaskRow key={t.id} task={t} />
+        {visible.map((t) => (
+          <TaskRow key={t.id} task={t} onHide={() => handleHide(t.id)} />
         ))}
         {adding ? (
-          <NewTaskInput
-            onCancel={() => setAdding(false)}
-            onSubmit={(text) => {
-              startTransition(async () => {
-                await addTask({ date, kind, text });
-                setAdding(false);
-              });
-            }}
-          />
+          <NewTaskInput onCancel={() => setAdding(false)} onSubmit={handleAdd} />
         ) : null}
       </CardContent>
     </Card>
   );
 }
 
-function TaskRow({ task }: { task: JournalTask }) {
-  // Trace stub rows (left behind by moveJournalTask): render simpler,
-  // read-only, with no interactive controls.
+function TaskRow({ task, onHide }: { task: JournalTask; onHide: () => void }) {
   if (isTraceTask(task.text)) {
     return <TraceRow text={task.text} />;
   }
-
-  return <ActiveTaskRow task={task} />;
+  return <ActiveTaskRow task={task} onHide={onHide} />;
 }
 
 function TraceRow({ text }: { text: string }) {
@@ -93,15 +117,11 @@ function TraceRow({ text }: { text: string }) {
   );
 }
 
-function ActiveTaskRow({ task }: { task: JournalTask }) {
+function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => void }) {
   const [text, setText] = useState(task.text);
   const [done, setDone] = useState(task.done);
-  const [, startTransition] = useTransition();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync local state when the parent re-renders this row with fresh server
-  // data after revalidatePath. The proper "key={task.id+text+done}" remount
-  // pattern works too but is more disruptive to the focused textarea.
   useEffect(() => {
     setText(task.text);
     setDone(task.done);
@@ -110,9 +130,7 @@ function ActiveTaskRow({ task }: { task: JournalTask }) {
   function scheduleTextSave(next: string) {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      startTransition(async () => {
-        await updateTaskText({ id: task.id, text: next });
-      });
+      void mutate("update_task_text", { id: task.id, text: next });
     }, 800);
   }
 
@@ -122,11 +140,8 @@ function ActiveTaskRow({ task }: { task: JournalTask }) {
         type="button"
         aria-pressed={done}
         onClick={() => {
-          const next = !done;
-          setDone(next);
-          startTransition(async () => {
-            await toggleTask(task.id);
-          });
+          setDone(!done);
+          void mutate("toggle_task", { id: task.id });
         }}
         className={cn(
           "mt-1.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
@@ -145,9 +160,7 @@ function ActiveTaskRow({ task }: { task: JournalTask }) {
         }}
         onBlur={() => {
           if (timerRef.current) clearTimeout(timerRef.current);
-          startTransition(async () => {
-            await updateTaskText({ id: task.id, text });
-          });
+          void mutate("update_task_text", { id: task.id, text });
         }}
         minRows={1}
         placeholder="…"
@@ -156,16 +169,15 @@ function ActiveTaskRow({ task }: { task: JournalTask }) {
           done && "text-muted-foreground line-through",
         )}
       />
-      {!done ? <MoveTaskButton taskId={task.id} taskDate={task.date} /> : null}
+      {!done ? <MoveTaskButton taskId={task.id} taskDate={task.date} onMoved={onHide} /> : null}
       <Button
         variant="ghost"
         size="icon-sm"
         aria-label="Delete task"
         className="opacity-50 hover:opacity-100"
         onClick={() => {
-          startTransition(async () => {
-            await deleteTask(task.id);
-          });
+          onHide();
+          void mutate("delete_task", { id: task.id });
         }}
       >
         <Trash2 />
@@ -180,11 +192,18 @@ function ActiveTaskRow({ task }: { task: JournalTask }) {
  * "picker" (embedded month-grid calendar). Stays inside this component to
  * avoid nesting two base-ui Popovers.
  */
-function MoveTaskButton({ taskId, taskDate }: { taskId: string; taskDate: string }) {
+function MoveTaskButton({
+  taskId,
+  taskDate,
+  onMoved,
+}: {
+  taskId: string;
+  taskDate: string;
+  onMoved: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"menu" | "picker">("menu");
   const [month, setMonth] = useState<DateString>(taskDate);
-  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     if (!open) setMode("menu");
@@ -200,14 +219,9 @@ function MoveTaskButton({ taskId, taskDate }: { taskId: string; taskDate: string
       return;
     }
     setOpen(false);
-    startTransition(async () => {
-      try {
-        await moveJournalTask({ id: taskId, newDate });
-        toast.success(`Moved to ${newDate}`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to move task");
-      }
-    });
+    onMoved();
+    void mutate("move_task", { id: taskId, newDate });
+    toast.success(`Moved to ${newDate}`);
   }
 
   return (
@@ -231,7 +245,7 @@ function MoveTaskButton({ taskId, taskDate }: { taskId: string; taskDate: string
               <div className="flex w-44 flex-col">
                 <button
                   type="button"
-                  disabled={pending || quickTarget === taskDate}
+                  disabled={quickTarget === taskDate}
                   onClick={() => move(quickTarget)}
                   className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
                 >
@@ -239,7 +253,6 @@ function MoveTaskButton({ taskId, taskDate }: { taskId: string; taskDate: string
                 </button>
                 <button
                   type="button"
-                  disabled={pending}
                   onClick={() => setMode("picker")}
                   className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
                 >

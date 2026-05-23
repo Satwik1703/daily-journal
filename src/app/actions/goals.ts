@@ -125,6 +125,7 @@ function revalidateGoals() {
 // ---------- Goals CRUD ----------
 
 export async function createGoal(input: {
+  id?: string;
   period: GoalPeriod;
   periodKey: string;
   title: string;
@@ -212,7 +213,7 @@ export async function createGoal(input: {
     return { id: yearGoalId };
   }
 
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   const position = await nextPositionFor(period, periodKey);
   await db.insert(goals).values({
     id,
@@ -742,6 +743,7 @@ export async function unarchiveGoal(id: string): Promise<void> {
 // ---------- Number goal progress ----------
 
 export async function logProgress(input: {
+  id?: string;
   goalId: string;
   delta: number;
   note?: string | null;
@@ -755,7 +757,7 @@ export async function logProgress(input: {
   if (!Number.isFinite(delta) || delta === 0) throw new Error("delta must be a non-zero number");
   const date = input.date ?? todayLocal();
   if (!isValidDateString(date)) throw new Error(`Invalid date: ${date}`);
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   await db.insert(goalProgress).values({
     id,
     goalId: input.goalId,
@@ -776,6 +778,7 @@ export async function deleteProgress(id: string): Promise<void> {
 // ---------- Milestone checklist ----------
 
 export async function addChecklistItem(input: {
+  id?: string;
   goalId: string;
   text: string;
 }): Promise<{ id: string }> {
@@ -789,7 +792,7 @@ export async function addChecklistItem(input: {
     .from(goalChecklist)
     .where(eq(goalChecklist.goalId, input.goalId));
   const position = existing.length === 0 ? 0 : Math.max(...existing.map((r) => r.position)) + 1;
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   await db.insert(goalChecklist).values({ id, goalId: input.goalId, text, position });
   revalidateGoals();
   return { id };

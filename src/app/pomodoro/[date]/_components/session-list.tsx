@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,27 +15,28 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/pomodoro-meta";
 import type { PomodoroDay } from "@/db/queries/pomodoro";
-import { deleteSession } from "@/app/actions/pomodoro";
+import { mutate } from "@/lib/sync/mutate";
 
 type Session = PomodoroDay["sessions"][number];
 
 export function SessionList({ sessions }: { sessions: Session[] }) {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
   function handleDelete() {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
-    startTransition(async () => {
-      try {
-        await deleteSession(id);
-        toast.success("Session deleted");
-        setDeleteTarget(null);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete");
-      }
+    setHiddenIds((s) => {
+      const next = new Set(s);
+      next.add(id);
+      return next;
     });
+    void mutate("delete_session", { id });
+    toast.success("Session deleted");
+    setDeleteTarget(null);
   }
+
+  const visible = sessions.filter((s) => !hiddenIds.has(s.id));
 
   return (
     <Card>
@@ -43,17 +44,17 @@ export function SessionList({ sessions }: { sessions: Session[] }) {
         <CardTitle className="font-serif text-lg font-normal">
           Sessions
           <span className="ml-2 text-xs font-normal text-muted-foreground">
-            {sessions.length}
+            {visible.length}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {sessions.length === 0 ? (
+        {visible.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">
             No sessions yet on this day.
           </p>
         ) : (
-          sessions.map((s) => (
+          visible.map((s) => (
             <div
               key={s.id}
               className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3"
@@ -121,9 +122,7 @@ export function SessionList({ sessions }: { sessions: Session[] }) {
             <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
               Cancel
             </Button>
-            <Button variant="outline" onClick={handleDelete} disabled={pending}>
-              {pending ? "Deleting…" : "Delete"}
-            </Button>
+            <Button variant="outline" onClick={handleDelete}>Delete</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

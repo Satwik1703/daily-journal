@@ -27,6 +27,7 @@ function sanitizeText(raw: unknown, allowEmpty = false): string {
 }
 
 export async function addTask(input: {
+  id?: string;
   date: string;
   kind: string;
   text?: string;
@@ -35,7 +36,7 @@ export async function addTask(input: {
   const kind = sanitizeKind(input.kind);
   const text = sanitizeText(input.text ?? "", true); // allow empty for "blank row added"
   await ensureEntry(input.date);
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   const position = await nextTaskPosition(input.date, kind);
   await db.insert(journalTasks).values({ id, date: input.date, kind, text, position });
   revalidatePath(`/journal/${input.date}`);

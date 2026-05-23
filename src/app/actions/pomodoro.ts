@@ -40,6 +40,7 @@ function sanitizeTimestamp(raw: unknown, label: string): Date {
 }
 
 export async function createSession(input: {
+  id?: string;
   date?: string;
   startedAt: number;
   endedAt: number;
@@ -72,7 +73,7 @@ export async function createSession(input: {
   if (input.source !== "timer" && input.source !== "manual" && input.source !== "partial")
     throw new Error("Invalid source");
 
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   await db.insert(pomodoroSessions).values({
     id,
     date,

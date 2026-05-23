@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Play, Pause, Square, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ import {
 import { primeAudio, playPomodoroSound } from "@/lib/pomodoro-audio";
 import { formatLocalYMD } from "@/lib/dates";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
-import { createSession, updateSession } from "@/app/actions/pomodoro";
+import { mutate } from "@/lib/sync/mutate";
 import { CategoryPicker } from "./category-picker";
 import { TimeSpanBar } from "./time-span-bar";
 import { ManualSessionDialog } from "./manual-session-dialog";
@@ -168,7 +168,6 @@ export function TimerPanel({
     endedAt: number;
   } | null>(null);
   const [descText, setDescText] = useState("");
-  const [descPending, startDescTransition] = useTransition();
 
   const tickRef = useRef<number | null>(null);
   const stopSoundRef = useRef<(() => void) | null>(null);
@@ -191,7 +190,9 @@ export function TimerPanel({
     const startedAt = a.startedAt;
     const endedAt = a.startedAt + a.plannedMin * 60_000;
     const date = formatLocalYMD(new Date(startedAt));
-    void createSession({
+    const sessionId = nanoid(12);
+    void mutate("create_session", {
+      id: sessionId,
       date,
       startedAt,
       endedAt,
@@ -199,24 +200,19 @@ export function TimerPanel({
       plannedMin: a.plannedMin,
       categoryId: a.categoryId ?? null,
       source: "timer",
-    })
-      .then((res) => {
-        saveActive(null);
-        setActive(null);
-        setDescDialog({
-          sessionId: res.id,
-          source: "timer",
-          plannedMin: a.plannedMin,
-          durationMin: a.plannedMin,
-          startedAt,
-          endedAt,
-        });
-        setDescText("");
-        toast.success(`Pomo done · ${a.plannedMin}m`);
-      })
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to save session");
-      });
+    });
+    saveActive(null);
+    setActive(null);
+    setDescDialog({
+      sessionId,
+      source: "timer",
+      plannedMin: a.plannedMin,
+      durationMin: a.plannedMin,
+      startedAt,
+      endedAt,
+    });
+    setDescText("");
+    toast.success(`Pomo done · ${a.plannedMin}m`);
   }
 
   // ----- mount: hydrate from URL param > localStorage > null
@@ -419,7 +415,7 @@ export function TimerPanel({
     toast.info("Discarded session");
   }
 
-  async function savePartial() {
+  function savePartial() {
     if (!active) return;
     setStopOpen(false);
     void cancelCompletionNotification();
@@ -428,47 +424,39 @@ export function TimerPanel({
     const durationMin = Math.max(1, Math.round(elapsed / 60_000));
     const startedAt = active.startedAt;
     const date = formatLocalYMD(new Date(startedAt));
-    try {
-      const res = await createSession({
-        date,
-        startedAt,
-        endedAt,
-        durationMin,
-        plannedMin: active.plannedMin,
-        categoryId: active.categoryId ?? null,
-        source: "partial",
-      });
-      saveActive(null);
-      setActive(null);
-      setPhase("idle");
-      setDescDialog({
-        sessionId: res.id,
-        source: "partial",
-        plannedMin: active.plannedMin,
-        durationMin,
-        startedAt,
-        endedAt,
-      });
-      setDescText("");
-      toast.success(`Saved ${durationMin}m partial`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save");
-    }
+    const sessionId = nanoid(12);
+    void mutate("create_session", {
+      id: sessionId,
+      date,
+      startedAt,
+      endedAt,
+      durationMin,
+      plannedMin: active.plannedMin,
+      categoryId: active.categoryId ?? null,
+      source: "partial",
+    });
+    saveActive(null);
+    setActive(null);
+    setPhase("idle");
+    setDescDialog({
+      sessionId,
+      source: "partial",
+      plannedMin: active.plannedMin,
+      durationMin,
+      startedAt,
+      endedAt,
+    });
+    setDescText("");
+    toast.success(`Saved ${durationMin}m partial`);
   }
 
   function handleSaveDescription() {
     if (!descDialog) return;
     const id = descDialog.sessionId;
     const text = descText.trim();
-    startDescTransition(async () => {
-      try {
-        if (text) await updateSession({ id, description: text });
-        setDescDialog(null);
-        if (stopSoundRef.current) stopSoundRef.current();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed");
-      }
-    });
+    if (text) void mutate("update_session", { id, description: text });
+    setDescDialog(null);
+    if (stopSoundRef.current) stopSoundRef.current();
   }
 
   function dismissDescription() {
@@ -875,9 +863,7 @@ export function TimerPanel({
             <DialogClose render={<Button type="button" variant="ghost" />}>
               Skip
             </DialogClose>
-            <Button onClick={handleSaveDescription} disabled={descPending}>
-              {descPending ? "Saving…" : "Save"}
-            </Button>
+            <Button onClick={handleSaveDescription}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

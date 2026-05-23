@@ -257,6 +257,7 @@ export async function toggleHabitForDate(
  * allowed and summed on read; pass a negative delta to undo.
  */
 export async function logHabitValue(input: {
+  id?: string;
   habitId: string;
   value: number;
   date?: string;
@@ -274,7 +275,7 @@ export async function logHabitValue(input: {
   }
   const date = input.date ?? todayLocal();
   if (!isValidDateString(date)) throw new Error(`Invalid date: ${date}`);
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   await db.insert(habitValueLogs).values({
     id,
     habitId: input.habitId,

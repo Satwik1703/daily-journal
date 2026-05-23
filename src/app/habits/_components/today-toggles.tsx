@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useOptimistic, useState, useTransition } from "react";
+import { startTransition, useOptimistic, useState } from "react";
+import { customAlphabet } from "nanoid";
 import { Check, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,10 +17,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { logHabitValue, toggleHabitForDate } from "@/app/actions/habits";
+import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
 import { isHabitDoneOnDate, type HabitTrackingKind } from "@/lib/habit-meta";
 import type { Habit } from "@/db/queries/habits";
+
+const valueLogId = customAlphabet(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+  12,
+);
 
 export function TodayToggles({
   anchor,
@@ -47,6 +53,14 @@ export function TodayToggles({
       else next.delete(update.id);
       return next;
     },
+  );
+  // Optimistic number-habit values keyed by habitId. Sums against server value.
+  const [optimisticValues, applyValueDelta] = useOptimistic(
+    valueAtAnchor,
+    (current: Record<string, number>, update: { habitId: string; delta: number }) => ({
+      ...current,
+      [update.habitId]: (current[update.habitId] ?? 0) + update.delta,
+    }),
   );
 
   return (
@@ -83,7 +97,8 @@ export function TodayToggles({
                 habit={h}
                 anchor={anchor}
                 done={done}
-                valueToday={valueAtAnchor[h.id] ?? 0}
+                valueToday={optimisticValues[h.id] ?? 0}
+                onLogValue={(delta) => applyValueDelta({ habitId: h.id, delta })}
               />
             );
           }
@@ -115,19 +130,14 @@ function BinaryRow({
   done: boolean;
   onOptimistic: (next: boolean) => void;
 }) {
-  const [, startTransition] = useTransition();
   return (
     <button
       type="button"
       aria-pressed={done}
       onClick={() => {
-        startTransition(async () => {
+        startTransition(() => {
           onOptimistic(!done);
-          try {
-            await toggleHabitForDate(habit.id, anchor);
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Toggle failed");
-          }
+          void mutate("toggle_habit", { habitId: habit.id, date: anchor });
         });
       }}
       className={cn(
@@ -157,11 +167,13 @@ function NumberRow({
   anchor,
   done,
   valueToday,
+  onLogValue,
 }: {
   habit: Habit;
   anchor: string;
   done: boolean;
   valueToday: number;
+  onLogValue: (delta: number) => void;
 }) {
   const target = habit.dailyTarget ?? 0;
   // Recompute done locally in case the snapshot was computed before this
@@ -188,7 +200,7 @@ function NumberRow({
           {habit.unit ? ` ${habit.unit}` : ""}
         </div>
       </div>
-      <LogValueButton habitId={habit.id} anchor={anchor} unit={habit.unit} />
+      <LogValueButton habitId={habit.id} anchor={anchor} unit={habit.unit} onLogged={onLogValue} />
     </div>
   );
 }
@@ -197,15 +209,16 @@ function LogValueButton({
   habitId,
   anchor,
   unit,
+  onLogged,
 }: {
   habitId: string;
   anchor: string;
   unit: string | null;
+  onLogged: (delta: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
-  const [pending, startTransition] = useTransition();
 
   function submit() {
     const n = Number(value);
@@ -213,17 +226,20 @@ function LogValueButton({
       toast.error("Enter a non-zero number");
       return;
     }
-    startTransition(async () => {
-      try {
-        await logHabitValue({ habitId, value: n, date: anchor, note: note || undefined });
-        setOpen(false);
-        setValue("");
-        setNote("");
-        toast.success(`+${n} logged`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Log failed");
-      }
+    startTransition(() => {
+      onLogged(n);
     });
+    void mutate("log_habit_value", {
+      id: valueLogId(),
+      habitId,
+      value: n,
+      date: anchor,
+      note: note || undefined,
+    });
+    setOpen(false);
+    setValue("");
+    setNote("");
+    toast.success(`+${n} logged`);
   }
 
   return (
@@ -265,12 +281,10 @@ function LogValueButton({
             />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : "Save"}
-            </Button>
+            <Button onClick={submit}>Save</Button>
           </div>
         </div>
       </DialogContent>

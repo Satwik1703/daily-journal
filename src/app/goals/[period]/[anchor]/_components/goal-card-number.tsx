@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { nanoid } from "nanoid";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import { logProgress } from "@/app/actions/goals";
+import { mutate } from "@/lib/sync/mutate";
 import {
   GOAL_STATUS_LABELS,
   PACE_PILL_LABELS,
@@ -119,7 +120,6 @@ function LogProgressButton({ goalId, unit }: { goalId: string; unit: string | nu
   const [open, setOpen] = useState(false);
   const [delta, setDelta] = useState("1");
   const [note, setNote] = useState("");
-  const [pending, startTransition] = useTransition();
 
   function submit() {
     const n = Number(delta);
@@ -127,17 +127,16 @@ function LogProgressButton({ goalId, unit }: { goalId: string; unit: string | nu
       toast.error("Enter a non-zero number");
       return;
     }
-    startTransition(async () => {
-      try {
-        await logProgress({ goalId, delta: n, note: note || undefined });
-        setOpen(false);
-        setDelta("1");
-        setNote("");
-        toast.success(n > 0 ? `+${n} logged` : `${n} logged`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to log progress");
-      }
+    void mutate("log_progress", {
+      id: nanoid(12),
+      goalId,
+      delta: n,
+      note: note || undefined,
     });
+    setOpen(false);
+    setDelta("1");
+    setNote("");
+    toast.success(n > 0 ? `+${n} logged` : `${n} logged`);
   }
 
   return (
@@ -178,12 +177,10 @@ function LogProgressButton({ goalId, unit }: { goalId: string; unit: string | nu
             />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : "Save"}
-            </Button>
+            <Button onClick={submit}>Save</Button>
           </div>
         </div>
       </DialogContent>
