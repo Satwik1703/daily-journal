@@ -84,6 +84,7 @@ async function assertCategoryExists(id: string): Promise<void> {
 }
 
 export async function createHabit(input: {
+  id?: string;
   name: string;
   emoji?: string | null;
   color?: string;
@@ -114,7 +115,7 @@ export async function createHabit(input: {
     // unit only meaningful for number kind — silently null-out instead of erroring
   }
 
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   const position = await nextPosition();
   await db.insert(habits).values({
     id,

@@ -1,29 +1,22 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { Play } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SOUND_OPTIONS } from "@/lib/pomodoro-meta";
 import { primeAudio, playPomodoroSound } from "@/lib/pomodoro-audio";
-import { setPomodoroSound } from "@/app/actions/settings";
+import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function SoundPicker({ currentSoundId }: { currentSoundId: string }) {
   const [selected, setSelected] = useState(currentSoundId);
-  const [pending, startTransition] = useTransition();
 
   function handleSelect(id: string) {
     setSelected(id);
-    startTransition(async () => {
-      try {
-        await setPomodoroSound(id);
-        toast.success("Sound updated");
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed");
-      }
-    });
+    void mutate("set_pomo_sound", { soundId: id });
+    toast.success("Sound updated");
   }
 
   function preview(id: string) {
@@ -55,7 +48,6 @@ export function SoundPicker({ currentSoundId }: { currentSoundId: string }) {
                 type="button"
                 onClick={() => handleSelect(s.id)}
                 className="flex flex-1 items-start gap-3 text-left"
-                disabled={pending}
               >
                 <span
                   aria-hidden

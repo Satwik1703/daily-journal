@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { mutate } from "@/lib/sync/mutate";
+import { mutate, mutateWithUndo } from "@/lib/sync/mutate";
 import { TASK_KIND_HINTS, TASK_KIND_LABELS, TASK_KINDS, isTraceTask, type TaskKind } from "@/lib/task-meta";
 import { addDays, shiftMonth, todayLocal, type DateString } from "@/lib/dates";
 import type { JournalTask } from "@/db/queries/journal-tasks";
@@ -53,13 +53,28 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
     setAdding(false);
   }
 
-  function handleHide(id: string) {
+  function handleHide(id: string): () => void {
+    let removedOptimistic: JournalTask | undefined;
     setHiddenIds((s) => {
       const next = new Set(s);
       next.add(id);
       return next;
     });
-    setOptimisticAdded((arr) => arr.filter((t) => t.id !== id));
+    setOptimisticAdded((arr) => {
+      removedOptimistic = arr.find((t) => t.id === id);
+      return arr.filter((t) => t.id !== id);
+    });
+    return () => {
+      setHiddenIds((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+      if (removedOptimistic) {
+        const restored = removedOptimistic;
+        setOptimisticAdded((arr) => [...arr, restored]);
+      }
+    };
   }
 
   return (
@@ -97,7 +112,7 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
   );
 }
 
-function TaskRow({ task, onHide }: { task: JournalTask; onHide: () => void }) {
+function TaskRow({ task, onHide }: { task: JournalTask; onHide: () => () => void }) {
   if (isTraceTask(task.text)) {
     return <TraceRow text={task.text} />;
   }
@@ -117,7 +132,7 @@ function TraceRow({ text }: { text: string }) {
   );
 }
 
-function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => void }) {
+function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => () => void }) {
   const [text, setText] = useState(task.text);
   const [done, setDone] = useState(task.done);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -176,8 +191,12 @@ function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => void
         aria-label="Delete task"
         className="opacity-50 hover:opacity-100"
         onClick={() => {
-          onHide();
-          void mutate("delete_task", { id: task.id });
+          const undo = onHide();
+          mutateWithUndo(
+            "delete_task",
+            { id: task.id },
+            { message: "Task deleted", onUndo: undo },
+          );
         }}
       >
         <Trash2 />
@@ -199,7 +218,7 @@ function MoveTaskButton({
 }: {
   taskId: string;
   taskDate: string;
-  onMoved: () => void;
+  onMoved: () => unknown;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"menu" | "picker">("menu");

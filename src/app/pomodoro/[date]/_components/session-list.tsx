@@ -11,11 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/pomodoro-meta";
 import type { PomodoroDay } from "@/db/queries/pomodoro";
-import { mutate } from "@/lib/sync/mutate";
+import { mutateWithUndo } from "@/lib/sync/mutate";
 
 type Session = PomodoroDay["sessions"][number];
 
@@ -31,9 +30,20 @@ export function SessionList({ sessions }: { sessions: Session[] }) {
       next.add(id);
       return next;
     });
-    void mutate("delete_session", { id });
-    toast.success("Session deleted");
     setDeleteTarget(null);
+    mutateWithUndo(
+      "delete_session",
+      { id },
+      {
+        message: "Session deleted",
+        onUndo: () =>
+          setHiddenIds((s) => {
+            const next = new Set(s);
+            next.delete(id);
+            return next;
+          }),
+      },
+    );
   }
 
   const visible = sessions.filter((s) => !hiddenIds.has(s.id));

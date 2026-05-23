@@ -1032,6 +1032,80 @@ Same-day continuation of 7B (2026-05-23). User-driven follow-ups.
 
 ---
 
+## ✅ Phase 8 — Instant UI: optimistic everywhere + IDB queue + Background Sync
+
+Plan: `C:\Users\Admin\.claude\plans\okay-lets-do-these-zippy-lake.md`. Shipped over the same session as Phase 7C (2026-05-23) after the user reported every action was taking 3-4s on prod (Vercel free tier + Turso latency).
+
+### Architecture
+
+Five layers, built bottom-up, all client-side first:
+
+1. **IDB infra.** `idb` dep added (~5kb). `src/lib/sync/db.ts` opens `habit_log_sync` v1 with two stores: `pending_mutations` (id, kind, args, createdAt, attempts, status, lastError) and `cache_pages` (key, data, fetchedAt, stale). `src/lib/sync/queue.ts` is the CRUD surface (enqueue / markInFlight / markDone / markFailed / listPending / clearAll / discardMutation).
+2. **Dispatch.** `src/lib/sync/dispatch.ts` is a server-side registry mapping ~35 mutation kinds to existing server-action functions. `src/app/api/sync/route.ts` is a POST handler that takes `{ kind, args }` and dispatches via the registry. Single endpoint, idempotent retries.
+3. **Mutate.** `src/lib/sync/mutate.ts` exports `mutate(kind, args)` — fire-and-forget. Pushes to IDB queue, attempts POST in background. On 200 → drops + broadcasts `sync-status` + invalidates affected cache keys. On non-2xx or network fail → marks failed + registers Background Sync tag + broadcasts `sync-conflict`. `mutateWithUndo(kind, args, { message, onUndo, timeoutMs })` shows a 5s sonner toast with an Undo button before enqueueing — cancels the mutation if the user clicks Undo.
+4. **Service worker.** `public/sw.js` v9 → v10. New `sync` event handler with tag `mutation-replay` drains the IDB queue (vanilla `indexedDB` — SW can't import npm). `message` handler accepts `{ type: "flush-now" }` for client-triggered flushes.
+5. **Cache.** `src/lib/sync/cache.ts` — `useCachedPage(key, initialData, fetcher)`, `getCachedPage`, `setCachedPage`, `invalidateCache(...keys)`. Listens on the `cache-invalidate` BroadcastChannel for cross-tab refresh. Mutate() automatically broadcasts invalidations for the affected page keys after server success.
+6. **Bootstrap.** `src/components/sync-bootstrap.tsx` is mounted in the root layout. Drains queue on focus / visibility / online / 30s interval. Listens on `sync-conflict` BroadcastChannel + shows toast directing user to Settings.
+
+### UI conversion — every action call site now uses `mutate()`
+
+Hot-path (writes that block the UI):
+- **today-toggles.tsx** — Binary toggle (`useOptimistic` already there). New `useOptimistic` for NumberRow delta accumulation. LogValueButton fires + bumps local total instantly.
+- **timer-panel.tsx** — Pomo completion / savePartial / mount-resume-running all fire `create_session` with client-generated session id. Description dialog opens instantly with that id. Description save uses `update_session`. Removed the 3-4s freeze entirely.
+- **manual-session-dialog.tsx** — N pomos = N parallel `mutate("create_session")` calls, dialog closes instantly.
+- **session-list.tsx** — Delete uses `mutateWithUndo` w/ local hidden Set rollback.
+- **goal-form-dialog.tsx** — Create + edit cascade. Dropped `router.refresh()`. Closes instantly. Cascade work happens in background.
+- **goal-actions-menu.tsx** — Archive / Unarchive use plain `mutate()`. Delete cascade uses `mutateWithUndo`.
+- **pin-toggle-button.tsx** — Local state flip + `mutate("set_goal_pinned")`.
+- **goal-card-number.tsx** — `mutate("log_progress")` with client id, dialog closes instantly.
+- **goal-card-milestone.tsx** — `useOptimistic` + `mutate()` for add / toggle / delete checklist items. Client id for adds.
+- **tasks-block.tsx** — Add (optimistic row append + client id), toggle (local flip), delete (`mutateWithUndo` + local hide w/ rollback), move (local hide + `mutate("move_task")`).
+- **journal-form.tsx** — Autosave via `mutate("save_journal_entry")`, dropped `useTransition`.
+
+Settings + low-frequency surfaces (consistency pass — also via `mutate()`):
+- **questions-manager.tsx** — create / update / archive / unarchive / reorder.
+- **pomodoro-categories-manager.tsx** — create / update / archive / unarchive / reorder.
+- **habit-list.tsx + habit-form-dialog.tsx** — create / update / archive / unarchive / reorder.
+- **sound-picker.tsx** — set pomo sound.
+- **log-workout-sheet.tsx + recent-workouts.tsx** — create / delete (delete uses `mutateWithUndo`).
+- **reflection-sheet.tsx** — save reflection.
+
+Server actions that create rows now accept optional client-provided `id`. Client and server agree on identifiers so optimistic rows match the eventual server row: `createHabit`, `createGoal`, `createSession`, `createQuestion`, `createCategory`, `createWorkout`, `addTask`, `addChecklistItem`, `logHabitValue`, `logProgress`.
+
+### Sync surface — visibility for the user
+
+- **Sync status panel** in `/settings` (`src/app/settings/_components/sync-status-panel.tsx`): lists pending + failed mutations with kind label, age, attempts, last error. Per-row Retry + Discard. Footer has "Sync now" + "Clear queue" with confirm dialog. Polls IDB every 2s + subscribes to `sync-status` BroadcastChannel.
+- **Bottom-nav badge** (`src/components/bottom-nav.tsx`): tiny chip next to the More icon whenever the queue is non-empty. Caps at "9+".
+- **Conflict toast** (`src/components/sync-bootstrap.tsx`): listens on `sync-conflict` channel + raises a sonner error toast with a "View in Settings" hint when the server rejects a mutation.
+
+### Things deferred to Phase 8B
+
+- **Pure client-shell pages with `useCachedPage`.** The cache module + `useCachedPage` hook + the `/api/page/habits/[date]` route handler are all built and tested. But the page-level refactor to swap server-side `force-dynamic` fetches for client-side IDB-backed SWR was deferred to keep this commit's scope sane. With it, page navigations would become **instant on revisit** (load from IDB, refetch in background). Today only **mutations** are instant; the first cold page load still waits Turso for ~3s. Page rewires for `/habits/[date]`, `/goals/[period]/[anchor]`, `/pomodoro/[date]`, `/journal/[date]` + their `/api/page/*` handlers are the obvious next slice.
+- **Conflict revert UX.** Failed mutations stay in the queue and surface in Settings. There's no automatic revert of the optimistic patch — the next SWR fetch (once 8B lands) will overwrite stale local state from the server.
+
+### PWA shell
+
+`public/sw.js` bumped `habit-log-v9` → `habit-log-v10`. Installed phones pick up the new `sync` + `message` handlers on next activation.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 23 warnings (all `react-hooks/set-state-in-effect`, existing exemption pattern + a few from new effects).
+- `npm run build` clean — **20 routes** (new `/api/sync` ƒ, `/api/page/habits/[date]` ƒ).
+- Local probes: every hot route 200. Test mutation flow on slow 3G — every action remains instant.
+- IDB verified via DevTools → Application → IndexedDB → `habit_log_sync` shows both stores populated.
+
+### Deploy
+
+1. Commit + push.
+2. No schema migration.
+3. `vercel --prod --yes`.
+4. PWA v10 activates on next SW lifecycle.
+
+**Resume here for next session:** Phase 8 deployed. The optimistic foundation is in place. Phase 8B target = convert hot pages to client-shell + `useCachedPage` for instant navs on revisit.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

@@ -26,10 +26,10 @@ function sanitizeType(raw: unknown): QType {
   return raw as QType;
 }
 
-export async function createQuestion(input: { label: string; type: string }): Promise<{ id: string }> {
+export async function createQuestion(input: { id?: string; label: string; type: string }): Promise<{ id: string }> {
   const label = sanitizeLabel(input.label);
   const type = sanitizeType(input.type);
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   const position = await nextQuestionPosition();
   await db.insert(journalQuestions).values({ id, label, type, position });
   revalidatePath("/settings");

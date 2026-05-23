@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Star, BookOpen } from "lucide-react";
 import {
@@ -14,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { saveReflection } from "@/app/actions/goals";
+import { mutate } from "@/lib/sync/mutate";
 import { formatHumanDate, type DateString } from "@/lib/dates";
 import type { GoalWithDerived } from "@/db/queries/goals";
 
@@ -29,8 +28,6 @@ export function ReflectionSheet({
   goal: GoalWithDerived;
   periodEnd: DateString;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [rating, setRating] = useState<number>(3);
   const [note, setNote] = useState<string>("");
   const [linkToJournal, setLinkToJournal] = useState<boolean>(true);
@@ -44,21 +41,14 @@ export function ReflectionSheet({
       toast.error("Write a quick note");
       return;
     }
-    startTransition(async () => {
-      try {
-        await saveReflection({
-          goalId: goal.id,
-          note,
-          rating,
-          linkedDate: linkToJournal ? periodEnd : null,
-        });
-        onOpenChange(false);
-        toast.success("Reflection saved");
-        router.refresh();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save reflection");
-      }
+    void mutate("save_reflection", {
+      goalId: goal.id,
+      note,
+      rating,
+      linkedDate: linkToJournal ? periodEnd : null,
     });
+    onOpenChange(false);
+    toast.success("Reflection saved");
   }
 
   return (
@@ -128,11 +118,11 @@ export function ReflectionSheet({
           </label>
 
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Skip
             </Button>
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : "Save"}
+            <Button onClick={submit}>
+              {"Save"}
             </Button>
           </div>
         </div>

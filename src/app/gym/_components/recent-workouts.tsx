@@ -1,10 +1,10 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { deleteWorkout } from "@/app/actions/gym";
+import { mutateWithUndo } from "@/lib/sync/mutate";
 import {
   INTENSITY_LABEL,
   MUSCLE_LABELS,
@@ -14,22 +14,22 @@ import {
 } from "@/lib/muscle-groups";
 import { formatHumanDate } from "@/lib/dates";
 import type { WorkoutWithMuscles } from "@/db/queries/gym";
-import { toast } from "sonner";
 
 export function RecentWorkouts({ workouts }: { workouts: WorkoutWithMuscles[] }) {
-  const [, startTransition] = useTransition();
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const visible = workouts.filter((w) => !hiddenIds.has(w.id));
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="font-serif text-lg font-normal">Recent workouts</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {workouts.length === 0 ? (
+        {visible.length === 0 ? (
           <p className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
             No workouts yet — tap “Log workout” above.
           </p>
         ) : null}
-        {workouts.map((w) => (
+        {visible.map((w) => (
           <div key={w.id} className="rounded-lg border border-border/70 px-3 py-2.5">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-medium">{formatHumanDate(w.date)}</div>
@@ -42,10 +42,20 @@ export function RecentWorkouts({ workouts }: { workouts: WorkoutWithMuscles[] })
                   size="icon-sm"
                   aria-label="Delete workout"
                   onClick={() => {
-                    startTransition(async () => {
-                      await deleteWorkout(w.id);
-                      toast.success("Deleted");
-                    });
+                    setHiddenIds((s) => new Set(s).add(w.id));
+                    mutateWithUndo(
+                      "delete_workout",
+                      { id: w.id },
+                      {
+                        message: "Workout deleted",
+                        onUndo: () =>
+                          setHiddenIds((s) => {
+                            const next = new Set(s);
+                            next.delete(w.id);
+                            return next;
+                          }),
+                      },
+                    );
                   }}
                 >
                   <Trash2 />

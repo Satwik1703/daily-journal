@@ -11,6 +11,7 @@ import { MUSCLE_GROUPS, type Intensity, type MuscleGroup } from "@/lib/muscle-gr
 const VALID_INTENSITIES = new Set<Intensity>(["light", "medium", "heavy"]);
 
 export async function createWorkout(input: {
+  id?: string;
   date: string;
   notes?: string | null;
   durationMin?: number | null;
@@ -35,7 +36,7 @@ export async function createWorkout(input: {
   const notes = input.notes?.trim() || null;
   const durationMin = typeof input.durationMin === "number" && input.durationMin > 0 ? input.durationMin : null;
 
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   await db.insert(workouts).values({ id, date: input.date, notes, durationMin });
   for (const m of validated) {
     await db.insert(muscleLogs).values({

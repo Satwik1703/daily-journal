@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import {
   Plus,
   MoreHorizontal,
@@ -49,13 +49,8 @@ import { PRESET_COLORS } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
-import {
-  createCategory,
-  updateCategory,
-  archiveCategory,
-  unarchiveCategory,
-  reorderCategories,
-} from "@/app/actions/pomodoro-categories";
+import { mutate } from "@/lib/sync/mutate";
+import { nanoid } from "nanoid";
 
 const SUGGESTED_EMOJI = ["💼", "📚", "📖", "🏃", "🎨", "✨", "🧘", "💻", "🎯", "✏️"];
 
@@ -70,7 +65,6 @@ export function PomodoroCategoriesManager({
   const [adding, setAdding] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [orderedActive, setOrderedActive] = useState<PomoCategory[]>(active);
-  const [, startTransition] = useTransition();
 
   useEffect(() => {
     setOrderedActive(active);
@@ -90,14 +84,8 @@ export function PomodoroCategoriesManager({
     const next = arrayMove(orderedActive, oldIndex, newIndex);
     const previous = orderedActive;
     setOrderedActive(next);
-    startTransition(async () => {
-      try {
-        await reorderCategories(next.map((c) => c.id));
-      } catch (err) {
-        setOrderedActive(previous);
-        toast.error(err instanceof Error ? err.message : "Failed to reorder");
-      }
-    });
+    void mutate("reorder_categories", { ids: next.map((c) => c.id) });
+    void previous;
   }
 
   return (
@@ -131,10 +119,8 @@ export function PomodoroCategoriesManager({
                   category={c}
                   onEdit={() => setEditing(c)}
                   onArchive={() => {
-                    startTransition(async () => {
-                      await archiveCategory(c.id);
-                      toast.success(`Archived "${c.name}"`);
-                    });
+                    void mutate("archive_category", { id: c.id });
+                    toast.success(`Archived "${c.name}"`);
                   }}
                 />
               ))}
@@ -158,10 +144,8 @@ export function PomodoroCategoriesManager({
                 muted
                 onEdit={() => setEditing(c)}
                 onArchive={() => {
-                  startTransition(async () => {
-                    await unarchiveCategory(c.id);
-                    toast.success(`Restored "${c.name}"`);
-                  });
+                  void mutate("unarchive_category", { id: c.id });
+                  toast.success(`Restored "${c.name}"`);
                 }}
                 archiveLabel="Unarchive"
                 ArchiveIcon={RotateCcw}
@@ -297,7 +281,6 @@ function CategoryFormDialog({
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("");
   const [color, setColor] = useState<string>(PRESET_COLORS[0]);
-  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     if (open) {
@@ -310,25 +293,14 @@ function CategoryFormDialog({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) return;
-    startTransition(async () => {
-      try {
-        if (category) {
-          await updateCategory({
-            id: category.id,
-            name,
-            emoji: emoji || null,
-            color,
-          });
-          toast.success(`Updated "${name}"`);
-        } else {
-          await createCategory({ name, emoji: emoji || null, color });
-          toast.success(`Added "${name}"`);
-        }
-        onOpenChange(false);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
-      }
-    });
+    if (category) {
+      void mutate("update_category", { id: category.id, name, emoji: emoji || null, color });
+      toast.success(`Updated "${name}"`);
+    } else {
+      void mutate("create_category", { id: nanoid(12), name, emoji: emoji || null, color });
+      toast.success(`Added "${name}"`);
+    }
+    onOpenChange(false);
   }
 
   return (
@@ -404,8 +376,8 @@ function CategoryFormDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button type="submit" disabled={pending || !name.trim()}>
-              {pending ? "Saving…" : category ? "Save" : "Add"}
+            <Button type="submit" disabled={!name.trim()}>
+              {category ? "Save" : "Add"}
             </Button>
           </DialogFooter>
         </form>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
+import { nanoid } from "nanoid";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { createHabit, updateHabit } from "@/app/actions/habits";
+import { mutate } from "@/lib/sync/mutate";
 import {
   HABIT_TRACKING_KINDS,
   PRESET_COLORS,
@@ -51,7 +52,6 @@ export function HabitFormDialog({
   const [dailyTarget, setDailyTarget] = useState<string>("");
   const [unit, setUnit] = useState<string>("");
   const [pomoCategoryId, setPomoCategoryId] = useState<string>("");
-  const [pending, startTransition] = useTransition();
 
   // Reset form fields when the dialog opens.
   useEffect(() => {
@@ -80,29 +80,23 @@ export function HabitFormDialog({
       toast.error("Pick a pomodoro category");
       return;
     }
-    startTransition(async () => {
-      try {
-        const payload = {
-          name,
-          emoji: emoji || null,
-          color,
-          trackingKind,
-          dailyTarget: trackingKind === "binary" ? null : targetNum,
-          unit: trackingKind === "number" ? unit || null : null,
-          pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
-        };
-        if (habit) {
-          await updateHabit({ id: habit.id, ...payload });
-          toast.success(`Updated “${name}”`);
-        } else {
-          await createHabit(payload);
-          toast.success(`Added “${name}”`);
-        }
-        onOpenChange(false);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save habit");
-      }
-    });
+    const payload = {
+      name,
+      emoji: emoji || null,
+      color,
+      trackingKind,
+      dailyTarget: trackingKind === "binary" ? null : targetNum,
+      unit: trackingKind === "number" ? unit || null : null,
+      pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
+    };
+    if (habit) {
+      void mutate("update_habit", { id: habit.id, ...payload });
+      toast.success(`Updated “${name}”`);
+    } else {
+      void mutate("create_habit", { id: nanoid(12), ...payload });
+      toast.success(`Added “${name}”`);
+    }
+    onOpenChange(false);
   }
 
   return (
@@ -257,8 +251,8 @@ export function HabitFormDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button type="submit" disabled={pending || !name.trim()}>
-              {pending ? "Saving…" : habit ? "Save" : "Add habit"}
+            <Button type="submit" disabled={!name.trim()}>
+              {habit ? "Save" : "Add habit"}
             </Button>
           </DialogFooter>
         </form>

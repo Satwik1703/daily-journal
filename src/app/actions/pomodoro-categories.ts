@@ -41,6 +41,7 @@ function revalidatePomodoro() {
 }
 
 export async function createCategory(input: {
+  id?: string;
   name: string;
   emoji?: string | null;
   color?: string;
@@ -48,7 +49,7 @@ export async function createCategory(input: {
   const name = sanitizeName(input.name);
   const emoji = sanitizeEmoji(input.emoji);
   const color = sanitizeColor(input.color ?? PRESET_COLORS[0]);
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   const position = await nextCategoryPosition();
   await db.insert(pomodoroCategories).values({ id, name, emoji, color, position });
   revalidatePomodoro();

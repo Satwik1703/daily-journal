@@ -1,9 +1,55 @@
 "use client";
 
+import { toast } from "sonner";
 import { enqueue, markDone, markFailed, markInFlight } from "./queue";
+import { invalidateCache } from "./cache";
 
 const STATUS_CHANNEL = "sync-status";
 const CONFLICT_CHANNEL = "sync-conflict";
+
+/**
+ * Map mutation kinds to the cache page keys they should invalidate on
+ * success. Triggers an SWR refetch on any open client.
+ */
+function cacheKeysFor(kind: string, args: unknown): string[] {
+  const a = (args ?? {}) as {
+    date?: string;
+    habitId?: string;
+    goalId?: string;
+    period?: string;
+    periodKey?: string;
+  };
+  const keys: string[] = [];
+  if (kind.startsWith("toggle_habit") || kind === "log_habit_value" || kind === "delete_habit_value_log") {
+    if (a.date) keys.push(`habits:${a.date}`);
+    keys.push("habits:*");
+  }
+  if (kind.startsWith("create_habit") || kind.startsWith("update_habit") || kind.startsWith("archive_habit") || kind.startsWith("unarchive_habit") || kind === "reorder_habits") {
+    keys.push("habits:*");
+    keys.push("settings");
+  }
+  if (kind === "create_session" || kind === "update_session" || kind === "delete_session") {
+    if (a.date) keys.push(`pomodoro:${a.date}`);
+    keys.push("pomodoro:*");
+    keys.push("insights");
+  }
+  if (kind === "save_journal_entry" || kind === "add_task" || kind === "toggle_task" || kind === "update_task_text" || kind === "delete_task" || kind === "move_task") {
+    if (a.date) keys.push(`journal:${a.date}`);
+    keys.push("journal:*");
+  }
+  if (kind.startsWith("create_goal") || kind.startsWith("update_goal_cascade") || kind.startsWith("delete_goal_cascade") || kind === "archive_goal" || kind === "unarchive_goal" || kind === "set_goal_pinned" || kind === "log_progress" || kind === "delete_progress" || kind === "add_checklist_item" || kind === "update_checklist_item" || kind === "toggle_checklist_item" || kind === "delete_checklist_item" || kind === "save_reflection") {
+    if (a.period && a.periodKey) keys.push(`goals:${a.period}:${a.periodKey}`);
+    keys.push("goals:*");
+  }
+  if (kind.includes("question")) keys.push("settings");
+  if (kind.includes("category")) {
+    keys.push("settings");
+    keys.push("pomodoro:*");
+  }
+  if (kind === "set_pomo_sound") keys.push("settings");
+  if (kind === "create_workout" || kind === "delete_workout") keys.push("gym");
+  return keys;
+}
 
 function broadcast(channel: string, payload: unknown): void {
   if (typeof BroadcastChannel === "undefined") return;
@@ -57,6 +103,7 @@ async function attemptSend(id: string, kind: string, args: unknown): Promise<voi
     if (res.ok) {
       await markDone(id);
       broadcast(STATUS_CHANNEL, { type: "done", id });
+      void invalidateCache(...cacheKeysFor(kind, args));
     } else {
       const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       const errMsg = body?.error ?? `HTTP ${res.status}`;
@@ -106,6 +153,42 @@ export async function flushQueue(): Promise<{ ok: number; failed: number }> {
   }
   broadcast(STATUS_CHANNEL, { type: "flushed", ok, failed });
   return { ok, failed };
+}
+
+/**
+ * Apply an optimistic mutation but defer the actual queue write for a few
+ * seconds, showing a sonner toast with an "Undo" button. If the user clicks
+ * Undo before the timeout, the optimistic patch is reverted via `onUndo` and
+ * no server mutation is queued. Otherwise the mutation enqueues normally.
+ *
+ * The caller is responsible for:
+ *   1. Applying the optimistic patch before calling this.
+ *   2. Implementing `onUndo` to revert that patch.
+ */
+export function mutateWithUndo(
+  kind: string,
+  args: unknown,
+  opts: {
+    message: string;
+    onUndo: () => void;
+    timeoutMs?: number;
+  },
+): void {
+  const timeout = opts.timeoutMs ?? 5000;
+  let undone = false;
+  toast(opts.message, {
+    duration: timeout,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        undone = true;
+        opts.onUndo();
+      },
+    },
+  });
+  window.setTimeout(() => {
+    if (!undone) void mutate(kind, args);
+  }, timeout);
 }
 
 export async function retryOne(id: string): Promise<boolean> {

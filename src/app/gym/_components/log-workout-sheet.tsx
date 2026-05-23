@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { nanoid } from "nanoid";
 import { Plus } from "lucide-react";
 import {
   Sheet,
@@ -21,7 +22,7 @@ import {
   type MuscleGroup,
 } from "@/lib/muscle-groups";
 import { cn } from "@/lib/utils";
-import { createWorkout } from "@/app/actions/gym";
+import { mutate } from "@/lib/sync/mutate";
 import { todayLocal } from "@/lib/dates";
 import { toast } from "sonner";
 
@@ -33,7 +34,6 @@ export function LogWorkoutSheet() {
   const [picked, setPicked] = useState<Partial<Record<MuscleGroup, Intensity>>>({});
   const [duration, setDuration] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
-  const [pending, startTransition] = useTransition();
 
   function reset() {
     setPicked({});
@@ -64,21 +64,16 @@ export function LogWorkoutSheet() {
       toast.error("Pick at least one muscle group");
       return;
     }
-    startTransition(async () => {
-      try {
-        await createWorkout({
-          date: todayLocal(),
-          muscles,
-          durationMin: duration ? Number(duration) : null,
-          notes: notes || null,
-        });
-        toast.success("Workout logged");
-        setOpen(false);
-        reset();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
-      }
+    void mutate("create_workout", {
+      id: nanoid(12),
+      date: todayLocal(),
+      muscles,
+      durationMin: duration ? Number(duration) : null,
+      notes: notes || null,
     });
+    toast.success("Workout logged");
+    setOpen(false);
+    reset();
   }
 
   const pickedList = Object.entries(picked) as [MuscleGroup, Intensity][];
@@ -172,8 +167,8 @@ export function LogWorkoutSheet() {
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={pending || pickedList.length === 0}>
-            {pending ? "Saving…" : "Save workout"}
+          <Button onClick={submit} disabled={pickedList.length === 0}>
+            {"Save workout"}
           </Button>
         </div>
       </SheetContent>

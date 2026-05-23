@@ -50,13 +50,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import {
-  archiveQuestion,
-  createQuestion,
-  reorderQuestions,
-  unarchiveQuestion,
-  updateQuestion,
-} from "@/app/actions/journal-questions";
+import { mutate } from "@/lib/sync/mutate";
+import { nanoid } from "nanoid";
 import type { JournalQuestion } from "@/db/queries/journal-questions";
 
 const TYPES = [
@@ -99,14 +94,8 @@ export function QuestionsManager({
     const next = arrayMove(orderedActive, oldIndex, newIndex);
     const previous = orderedActive;
     setOrderedActive(next);
-    startTransition(async () => {
-      try {
-        await reorderQuestions(next.map((q) => q.id));
-      } catch (err) {
-        setOrderedActive(previous);
-        toast.error(err instanceof Error ? err.message : "Failed to reorder");
-      }
-    });
+    void mutate("reorder_questions", { orderedIds: next.map((q) => q.id) });
+    void previous;
   }
 
   return (
@@ -141,10 +130,8 @@ export function QuestionsManager({
                   q={q}
                   onEdit={() => setEditing(q)}
                   onArchive={() => {
-                    startTransition(async () => {
-                      await archiveQuestion(q.id);
-                      toast.success("Archived");
-                    });
+                    void mutate("archive_question", { id: q.id });
+                    toast.success("Archived");
                   }}
                 />
               ))}
@@ -170,10 +157,8 @@ export function QuestionsManager({
                 muted
                 onEdit={() => setEditing(q)}
                 onArchive={() => {
-                  startTransition(async () => {
-                    await unarchiveQuestion(q.id);
-                    toast.success("Restored");
-                  });
+                  void mutate("unarchive_question", { id: q.id });
+                  toast.success("Restored");
                 }}
                 archiveLabel="Unarchive"
                 ArchiveIcon={RotateCcw}
@@ -302,7 +287,6 @@ function QuestionDialog({
 }) {
   const [label, setLabel] = useState("");
   const [type, setType] = useState<QType>("text");
-  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     if (open) {
@@ -314,20 +298,14 @@ function QuestionDialog({
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!label.trim()) return;
-    startTransition(async () => {
-      try {
-        if (question) {
-          await updateQuestion({ id: question.id, label, type });
-          toast.success("Updated");
-        } else {
-          await createQuestion({ label, type });
-          toast.success("Question added");
-        }
-        onOpenChange(false);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
-      }
-    });
+    if (question) {
+      void mutate("update_question", { id: question.id, label, type });
+      toast.success("Updated");
+    } else {
+      void mutate("create_question", { id: nanoid(12), label, type });
+      toast.success("Question added");
+    }
+    onOpenChange(false);
   }
 
   return (
@@ -375,8 +353,8 @@ function QuestionDialog({
           </div>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={pending || !label.trim()}>
-              {pending ? "Saving…" : question ? "Save" : "Add question"}
+            <Button type="submit" disabled={!label.trim()}>
+              {question ? "Save" : "Add question"}
             </Button>
           </DialogFooter>
         </form>

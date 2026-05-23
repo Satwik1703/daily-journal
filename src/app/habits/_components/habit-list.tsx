@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import {
   MoreHorizontal,
   Pencil,
@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
-import { archiveHabit, reorderHabits, unarchiveHabit } from "@/app/actions/habits";
+import { mutate } from "@/lib/sync/mutate";
 import type { Habit } from "@/db/queries/habits";
 import { TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,6 @@ export function HabitList({
   const [editing, setEditing] = useState<Habit | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [orderedActive, setOrderedActive] = useState<Habit[]>(active);
-  const [, startTransition] = useTransition();
 
   useEffect(() => {
     setOrderedActive(active);
@@ -73,14 +72,8 @@ export function HabitList({
     const next = arrayMove(orderedActive, oldIndex, newIndex);
     const previous = orderedActive;
     setOrderedActive(next);
-    startTransition(async () => {
-      try {
-        await reorderHabits(next.map((h) => h.id));
-      } catch (err) {
-        setOrderedActive(previous);
-        toast.error(err instanceof Error ? err.message : "Failed to reorder");
-      }
-    });
+    void mutate("reorder_habits", { orderedIds: next.map((h) => h.id) });
+    void previous;
   }
 
   return (
@@ -117,10 +110,8 @@ export function HabitList({
                   subtitle={trackingSummary(h, categories)}
                   onEdit={() => setEditing(h)}
                   onArchive={() => {
-                    startTransition(async () => {
-                      await archiveHabit(h.id);
-                      toast.success(`Archived “${h.name}”`);
-                    });
+                    void mutate("archive_habit", { id: h.id });
+                    toast.success(`Archived “${h.name}”`);
                   }}
                 />
               ))}
@@ -136,10 +127,8 @@ export function HabitList({
                 muted
                 onEdit={() => setEditing(h)}
                 onArchive={() => {
-                  startTransition(async () => {
-                    await unarchiveHabit(h.id);
-                    toast.success(`Restored “${h.name}”`);
-                  });
+                  void mutate("unarchive_habit", { id: h.id });
+                  toast.success(`Restored “${h.name}”`);
                 }}
                 archiveLabel="Unarchive"
                 ArchiveIcon={RotateCcw}
