@@ -49,6 +49,7 @@ next-env.d.ts
 *.db-journal
 *.db-wal
 *.db-shm
+local.db.bak-*
 
 # dev server / build / deploy logs
 dev.log

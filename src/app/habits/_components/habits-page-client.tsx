@@ -13,7 +13,10 @@ import type { PomoCategory } from "@/db/queries/pomodoro-categories";
 
 type PageData = {
   snapshot: {
+    /** Weekday-mask-filtered list for the anchor day's toggles. */
     active: Habit[];
+    /** Full (mask-unfiltered) list for the multi-day grid. */
+    activeAll?: Habit[];
     archived: Habit[];
     today: string;
     doneOnAnchorIds: string[];
@@ -59,7 +62,8 @@ export function HabitsPageClient({ date }: { date: string }) {
 
       {data == null ? (
         <PageSkeleton />
-      ) : data.snapshot.active.length === 0 && data.snapshot.archived.length === 0 ? (
+      ) : (data.snapshot.activeAll ?? data.snapshot.active).length === 0 &&
+        data.snapshot.archived.length === 0 ? (
         <EmptyState isToday={isToday} />
       ) : (
         <>
@@ -77,7 +81,7 @@ export function HabitsPageClient({ date }: { date: string }) {
             pomoCountAtAnchor={data.pomoCountAtAnchor}
           />
           <HabitGrid
-            habits={data.snapshot.active}
+            habits={data.snapshot.activeAll ?? data.snapshot.active}
             windowDates={data.snapshot.windowDates}
             windowLogs={data.windowLogsRecord}
             windowValuesByHabit={data.windowValuesRecord}
@@ -86,7 +90,7 @@ export function HabitsPageClient({ date }: { date: string }) {
             anchor={date}
           />
           <HabitList
-            active={data.snapshot.active}
+            active={data.snapshot.activeAll ?? data.snapshot.active}
             archived={data.snapshot.archived}
             categories={data.pomoCategories}
           />

@@ -64,6 +64,13 @@
       "when": 1779636000000,
       "tag": "0008_body_weight",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1779637000000,
+      "tag": "0009_weekday_mask",
+      "breakpoints": true
     }
   ]
 }

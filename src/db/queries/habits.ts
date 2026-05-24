@@ -1,8 +1,12 @@
 import { db } from "@/db/client";
 import { habits, habitLogs, habitValueLogs, pomodoroSessions } from "@/db/schema";
 import { and, asc, between, eq, isNotNull, isNull } from "drizzle-orm";
-import { addDays, todayLocal, type DateString } from "@/lib/dates";
-import { isHabitDoneOnDate, type HabitTrackingKind } from "@/lib/habit-meta";
+import { addDays, parseDate, todayLocal, type DateString } from "@/lib/dates";
+import {
+  isHabitActiveOnWeekday,
+  isHabitDoneOnDate,
+  type HabitTrackingKind,
+} from "@/lib/habit-meta";
 
 export type Habit = typeof habits.$inferSelect;
 export type HabitLog = typeof habitLogs.$inferSelect;
@@ -55,7 +59,10 @@ export async function getPomoSessionsInRange(
 }
 
 export type HabitsSnapshot = {
+  /** All non-archived habits (no weekday-mask filtering). Use for grids spanning a range. */
   active: Habit[];
+  /** Subset of `active` whose `weekdayMask` includes `anchor`'s weekday. */
+  activeForAnchor: Habit[];
   archived: Habit[];
   /** The date the page is centered on. Today by default; a past date when backfilling. */
   anchor: DateString;
@@ -86,6 +93,12 @@ export async function getHabitsSnapshot(
     getValueLogsInRange(start, anchor),
     getPomoSessionsInRange(start, anchor),
   ]);
+
+  // Phase 10: subset for `anchor`-day rendering (weekday mask filter).
+  const anchorWeekday = parseDate(anchor).getDay();
+  const activeForAnchor = active.filter((h) =>
+    isHabitActiveOnWeekday(h.weekdayMask, anchorWeekday),
+  );
 
   // ----- Binary windowLogs -----
   const windowLogs = new Map<string, Set<DateString>>();
@@ -128,9 +141,9 @@ export async function getHabitsSnapshot(
     if (catMap) windowPomoByHabit.set(h.id, new Map(catMap));
   }
 
-  // ----- doneOnAnchorIds via kind-aware check -----
+  // ----- doneOnAnchorIds via kind-aware check (only for masked-on habits) -----
   const doneOnAnchorIds = new Set<string>();
-  for (const h of active) {
+  for (const h of activeForAnchor) {
     const kind = h.trackingKind as HabitTrackingKind;
     const hadLog = windowLogs.get(h.id)?.has(anchor) ?? false;
     const daySumOrCount =
@@ -151,6 +164,7 @@ export async function getHabitsSnapshot(
 
   return {
     active,
+    activeForAnchor,
     archived,
     anchor,
     today,

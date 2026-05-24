@@ -1,7 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatShortDate, parseDate, type DateString } from "@/lib/dates";
-import { isHabitDoneOnDate, type HabitTrackingKind } from "@/lib/habit-meta";
+import {
+  isHabitActiveOnWeekday,
+  isHabitDoneOnDate,
+  WEEKDAY_LABELS,
+  type HabitTrackingKind,
+} from "@/lib/habit-meta";
 import type { Habit } from "@/db/queries/habits";
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -71,6 +76,8 @@ export function HabitGrid({
                   style={{ gridTemplateColumns: `repeat(${windowDates.length}, minmax(0, 1fr))` }}
                 >
                   {windowDates.map((d) => {
+                    const weekday = parseDate(d).getDay();
+                    const isMasked = !isHabitActiveOnWeekday(h.weekdayMask, weekday);
                     const hadLog = logDates.has(d);
                     const daySumOrCount =
                       kind === "number"
@@ -80,6 +87,20 @@ export function HabitGrid({
                           : 0;
                     const done = isHabitDoneOnDate(kind, h.dailyTarget, daySumOrCount, hadLog);
                     const isRing = d === ringDate;
+                    if (isMasked && !done) {
+                      return (
+                        <span
+                          key={d}
+                          title={`${h.name} — Off on ${WEEKDAY_LABELS[weekday]}`}
+                          className={cn(
+                            "flex aspect-square items-center justify-center text-[8px] leading-none text-muted-foreground/40",
+                            isRing && "ring-1 ring-foreground/40 rounded-[2px]",
+                          )}
+                        >
+                          –
+                        </span>
+                      );
+                    }
                     return (
                       <span
                         key={d}

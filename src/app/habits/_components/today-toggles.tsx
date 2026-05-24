@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useOptimistic, useState } from "react";
+import { startTransition, useMemo, useOptimistic, useState } from "react";
 import { customAlphabet } from "nanoid";
 import { Check, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -44,9 +44,19 @@ export function TodayToggles({
   /** Count of pomodoro_sessions on `anchor` per pomo-kind habit id. */
   pomoCountAtAnchor: Record<string, number>;
 }) {
-  const initial = new Set(doneIds);
+  // Memoize the useOptimistic base values on stable content keys. A fresh
+  // `new Set(doneIds)` / `valueAtAnchor` reference each render would make
+  // React's useOptimistic resync to "initial" and discard the optimistic
+  // patch — which silently revives the pre-tap state during the API
+  // round-trip and produces the perceived "waits for API" lag.
+  const doneIdsKey = doneIds.join(",");
+  const initialDone = useMemo(
+    () => new Set(doneIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doneIdsKey],
+  );
   const [optimisticDone, setOptimisticDone] = useOptimistic(
-    initial,
+    initialDone,
     (current: Set<string>, update: { id: string; done: boolean }) => {
       const next = new Set(current);
       if (update.done) next.add(update.id);
@@ -55,8 +65,14 @@ export function TodayToggles({
     },
   );
   // Optimistic number-habit values keyed by habitId. Sums against server value.
+  const valuesKey = JSON.stringify(valueAtAnchor);
+  const stableValues = useMemo(
+    () => valueAtAnchor,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [valuesKey],
+  );
   const [optimisticValues, applyValueDelta] = useOptimistic(
-    valueAtAnchor,
+    stableValues,
     (current: Record<string, number>, update: { habitId: string; delta: number }) => ({
       ...current,
       [update.habitId]: (current[update.habitId] ?? 0) + update.delta,

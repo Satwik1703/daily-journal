@@ -74,6 +74,13 @@ function sanitizeDailyTarget(raw: unknown): number | null {
   return n;
 }
 
+function sanitizeWeekdayMask(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isInteger(n)) throw new Error("weekdayMask must be an integer");
+  if (n < 1 || n > 127) throw new Error("weekdayMask must be 1..127 (at least one day on)");
+  return n;
+}
+
 async function assertCategoryExists(id: string): Promise<void> {
   const rows = await db
     .select({ id: pomodoroCategories.id })
@@ -92,6 +99,7 @@ export async function createHabit(input: {
   dailyTarget?: number | null;
   unit?: string | null;
   pomoCategoryId?: string | null;
+  weekdayMask?: number;
 }): Promise<{ id: string }> {
   const name = sanitizeName(input.name);
   const emoji = sanitizeEmoji(input.emoji);
@@ -100,6 +108,7 @@ export async function createHabit(input: {
   const dailyTarget = sanitizeDailyTarget(input.dailyTarget);
   const unit = sanitizeUnit(input.unit);
   const pomoCategoryId = input.pomoCategoryId ?? null;
+  const weekdayMask = input.weekdayMask == null ? 127 : sanitizeWeekdayMask(input.weekdayMask);
 
   if (trackingKind === "number" && (dailyTarget == null || dailyTarget <= 0)) {
     throw new Error("Number habits need a positive daily target");
@@ -126,6 +135,7 @@ export async function createHabit(input: {
     dailyTarget,
     unit: trackingKind === "number" ? unit : null,
     pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
+    weekdayMask,
     position,
   });
   revalidatePath("/habits", "layout");
@@ -144,6 +154,7 @@ export async function updateHabit(input: {
   dailyTarget?: number | null;
   unit?: string | null;
   pomoCategoryId?: string | null;
+  weekdayMask?: number;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
   const patch: Record<string, unknown> = {};
@@ -160,6 +171,9 @@ export async function updateHabit(input: {
   if (input.pomoCategoryId !== undefined) {
     if (input.pomoCategoryId) await assertCategoryExists(input.pomoCategoryId);
     patch.pomoCategoryId = input.pomoCategoryId;
+  }
+  if (input.weekdayMask !== undefined) {
+    patch.weekdayMask = sanitizeWeekdayMask(input.weekdayMask);
   }
   if (Object.keys(patch).length === 0) return;
   await db.update(habits).set(patch).where(eq(habits.id, input.id));

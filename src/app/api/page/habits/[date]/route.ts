@@ -19,9 +19,11 @@ export async function GET(
     getActiveCategories(),
   ]);
 
-  const activeForAnchor = snapshot.active.filter(
-    (h) => formatLocalYMD(h.createdAt) <= date,
-  );
+  // Lifespan filter applies to both lists; weekday-mask filter only to the
+  // anchor-day toggles, not the multi-day grid.
+  const lifespanFilter = (h: { createdAt: Date }) => formatLocalYMD(h.createdAt) <= date;
+  const activeForAnchor = snapshot.activeForAnchor.filter(lifespanFilter);
+  const activeAll = snapshot.active.filter(lifespanFilter);
 
   const valueAtAnchor: Record<string, number> = {};
   const pomoCountAtAnchor: Record<string, number> = {};
@@ -48,7 +50,8 @@ export async function GET(
 
   return NextResponse.json({
     snapshot: {
-      active: activeForAnchor,
+      active: activeForAnchor,        // toggles use this (mask-filtered)
+      activeAll,                       // grid uses this (full list, mask not applied)
       archived: snapshot.archived,
       today: snapshot.today,
       doneOnAnchorIds: Array.from(snapshot.doneOnAnchorIds),

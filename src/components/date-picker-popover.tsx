@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Info } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Calendar, type CalendarCellRenderer } from "@/components/ui/calendar";
 import {
@@ -15,6 +16,7 @@ import {
   todayLocal,
   type DateString,
 } from "@/lib/dates";
+import type { CalendarLegend } from "@/lib/calendar-legends";
 import { cn } from "@/lib/utils";
 
 export type MonthStatusMap = Record<DateString, JournalStatus>;
@@ -26,6 +28,7 @@ export function DatePickerPopover({
   children,
   align = "center",
   disableFuture = true,
+  legend,
 }: {
   selected: DateString;
   onSelect: (date: DateString) => void;
@@ -34,11 +37,14 @@ export function DatePickerPopover({
   children: React.ReactNode;
   align?: "start" | "center" | "end";
   disableFuture?: boolean;
+  /** Optional per-tab legend explaining bucket rules. Adds an inline Info icon. */
+  legend?: CalendarLegend;
 }) {
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState<DateString>(selected);
   const [statusMap, setStatusMap] = useState<MonthStatusMap>({});
   const [loading, setLoading] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   const loadedMonthsRef = useRef<Set<string>>(new Set());
 
   // Reset focused month to the current selection whenever it changes externally.
@@ -116,7 +122,23 @@ export function DatePickerPopover({
             />
             <div className="mt-3 border-t border-border/60 pt-2.5">
               <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                <span>Legend</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span>Legend</span>
+                  {legend ? (
+                    <button
+                      type="button"
+                      aria-label={legendOpen ? "Hide legend details" : "Show legend details"}
+                      aria-pressed={legendOpen}
+                      onClick={() => setLegendOpen((v) => !v)}
+                      className={cn(
+                        "inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground",
+                        legendOpen && "bg-muted text-foreground",
+                      )}
+                    >
+                      <Info className="size-3" />
+                    </button>
+                  ) : null}
+                </span>
                 {loading ? <span className="normal-case tracking-normal">loading…</span> : null}
               </div>
               <div className="flex flex-wrap gap-x-2.5 gap-y-1.5 text-[10px] text-muted-foreground">
@@ -131,6 +153,27 @@ export function DatePickerPopover({
                   </span>
                 ))}
               </div>
+              {legend && legendOpen ? (
+                <div className="mt-2.5 rounded-md border border-border/60 bg-muted/30 p-2.5">
+                  <div className="text-[11px] font-medium text-foreground">{legend.title}</div>
+                  <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                    {legend.blurb}
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {legend.rows.map((r) => (
+                      <div key={r.status} className="flex items-start gap-2 text-[10px]">
+                        <span
+                          aria-hidden
+                          className="mt-0.5 size-2.5 shrink-0 rounded-[3px]"
+                          style={{ backgroundColor: statusBg(r.status) }}
+                        />
+                        <span className="font-medium text-foreground/85">{r.label}</span>
+                        <span className="text-muted-foreground">— {r.meaning}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </Popover.Popup>
         </Popover.Positioner>

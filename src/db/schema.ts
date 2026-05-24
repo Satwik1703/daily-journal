@@ -82,6 +82,10 @@ export const habits = sqliteTable("habits", {
     (): AnySQLiteColumn => pomodoroCategories.id,
     { onDelete: "set null" },
   ),
+  // Phase 10: 7-bit weekday mask. Bit i = JS Date.getDay() (Sun=0..Sat=6).
+  // Default 127 = 0b1111111 = all days. Habit hidden on weekdays where the
+  // corresponding bit is 0.
+  weekdayMask: integer("weekday_mask").notNull().default(127),
   position: integer("position").notNull().default(0),
   archivedAt: integer("archived_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })

@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { addDays, formatHumanDate, todayLocal } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import { DatePickerPopover } from "@/components/date-picker-popover";
+import { POMODORO_LEGEND } from "@/lib/calendar-legends";
 import { fetchPomodoroMonthStatus } from "@/app/actions/pomodoro-month";
 
 export function PomodoroDateStepper({ date }: { date: string }) {
@@ -29,6 +30,7 @@ export function PomodoroDateStepper({ date }: { date: string }) {
         selected={date}
         onSelect={(d) => router.push(`/pomodoro/${d}`)}
         fetchMonthStatus={fetchPomodoroMonthStatus}
+        legend={POMODORO_LEGEND}
       >
         <span className="flex flex-col items-center gap-0.5 px-2 py-1 transition-colors hover:bg-muted/60 rounded-md">
           <span className="inline-flex items-center gap-1 text-base font-medium leading-tight">

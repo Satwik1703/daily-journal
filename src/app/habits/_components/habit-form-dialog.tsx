@@ -15,10 +15,16 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { mutate } from "@/lib/sync/mutate";
 import {
+  arrayFromWeekdayMask,
   HABIT_TRACKING_KINDS,
   PRESET_COLORS,
   TRACKING_KIND_HINTS,
   TRACKING_KIND_LABELS,
+  WEEKDAY_LABELS,
+  WEEKDAY_MASK_ALL,
+  WEEKDAY_MASK_WEEKDAYS,
+  WEEKDAY_MASK_WEEKENDS,
+  weekdayMaskFromArray,
   type HabitTrackingKind,
 } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
@@ -52,6 +58,7 @@ export function HabitFormDialog({
   const [dailyTarget, setDailyTarget] = useState<string>("");
   const [unit, setUnit] = useState<string>("");
   const [pomoCategoryId, setPomoCategoryId] = useState<string>("");
+  const [weekdays, setWeekdays] = useState<boolean[]>(() => arrayFromWeekdayMask(WEEKDAY_MASK_ALL));
 
   // Reset form fields when the dialog opens.
   useEffect(() => {
@@ -63,12 +70,20 @@ export function HabitFormDialog({
       setDailyTarget(habit?.dailyTarget != null ? String(habit.dailyTarget) : "");
       setUnit(habit?.unit ?? "");
       setPomoCategoryId(habit?.pomoCategoryId ?? "");
+      setWeekdays(arrayFromWeekdayMask(habit?.weekdayMask ?? WEEKDAY_MASK_ALL));
     }
   }, [open, habit]);
+
+  const weekdayMask = weekdayMaskFromArray(weekdays);
+  const anyDayOn = weekdayMask > 0;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!anyDayOn) {
+      toast.error("Pick at least one day");
+      return;
+    }
     const targetNum = dailyTarget.trim() ? Number(dailyTarget) : null;
     if (trackingKind !== "binary") {
       if (targetNum == null || !Number.isFinite(targetNum) || targetNum <= 0) {
@@ -88,6 +103,7 @@ export function HabitFormDialog({
       dailyTarget: trackingKind === "binary" ? null : targetNum,
       unit: trackingKind === "number" ? unit || null : null,
       pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
+      weekdayMask,
     };
     if (habit) {
       void mutate("update_habit", { id: habit.id, ...payload });
@@ -247,11 +263,63 @@ export function HabitFormDialog({
             </div>
           ) : null}
 
+          <div className="space-y-1.5">
+            <Label>Active on</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {WEEKDAY_LABELS.map((label, i) => {
+                const on = weekdays[i];
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => {
+                      const next = [...weekdays];
+                      next[i] = !next[i];
+                      setWeekdays(next);
+                    }}
+                    className={cn(
+                      "min-w-[44px] rounded-md border px-2 py-1.5 text-xs transition-colors",
+                      on
+                        ? "border-primary bg-primary/15 text-foreground"
+                        : "border-input text-muted-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-1 pt-1">
+              <button
+                type="button"
+                onClick={() => setWeekdays(arrayFromWeekdayMask(WEEKDAY_MASK_ALL))}
+                className="rounded-md border border-input px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40"
+              >
+                Daily
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeekdays(arrayFromWeekdayMask(WEEKDAY_MASK_WEEKDAYS))}
+                className="rounded-md border border-input px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40"
+              >
+                Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeekdays(arrayFromWeekdayMask(WEEKDAY_MASK_WEEKENDS))}
+                className="rounded-md border border-input px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40"
+              >
+                Weekends
+              </button>
+            </div>
+          </div>
+
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button type="submit" disabled={!name.trim()}>
+            <Button type="submit" disabled={!name.trim() || !anyDayOn}>
               {habit ? "Save" : "Add habit"}
             </Button>
           </DialogFooter>

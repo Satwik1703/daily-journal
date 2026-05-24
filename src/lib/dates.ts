@@ -136,9 +136,30 @@ export function isoWeekKey(s: DateString): string {
   return `${isoYear}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-/** periodKey for a given date and period. */
+/**
+ * Return the ISO week key whose DISPLAY range (Sun-Sat) contains `s`.
+ *
+ * Why this exists: `isoWeekKey(s)` returns the ISO 8601 week, which is
+ * Monday-anchored. For a Sunday, that's the just-ended week. Our app's
+ * display convention treats Sunday as the START of a new week (Sun-Sat),
+ * so for navigation / "current week" purposes we need the week whose
+ * Sun-Sat span contains `s` — found by jumping to that display week's
+ * Thursday and reading back the ISO key (Thursday is the same in both
+ * conventions).
+ */
+export function weekKeyForDisplay(s: DateString): string {
+  const sunday = weekStartOf(s);
+  const thursday = addDays(sunday, 4);
+  return isoWeekKey(thursday);
+}
+
+/**
+ * periodKey for a given date and period. Uses display-week semantics for
+ * weeks so a Sunday lands in the week that *starts* on that Sunday, not the
+ * one that ends.
+ */
 export function periodKeyFor(s: DateString, period: GoalPeriod): string {
-  if (period === "week") return isoWeekKey(s);
+  if (period === "week") return weekKeyForDisplay(s);
   if (period === "month") return s.slice(0, 7);
   return s.slice(0, 4);
 }

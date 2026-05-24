@@ -37,7 +37,7 @@ import {
 import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
 import { mutate } from "@/lib/sync/mutate";
 import type { Habit } from "@/db/queries/habits";
-import { TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
+import { summarizeMask, TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -149,12 +149,17 @@ export function HabitList({
 
 function trackingSummary(habit: Habit, categories: CategoryOption[]): string {
   const kind = habit.trackingKind as HabitTrackingKind;
-  if (kind === "binary") return TRACKING_KIND_LABELS.binary;
-  if (kind === "number") {
-    return `${habit.dailyTarget ?? "?"} ${habit.unit ?? ""}/day`.trim();
+  let base: string;
+  if (kind === "binary") {
+    base = TRACKING_KIND_LABELS.binary;
+  } else if (kind === "number") {
+    base = `${habit.dailyTarget ?? "?"} ${habit.unit ?? ""}/day`.trim();
+  } else {
+    const cat = categories.find((c) => c.id === habit.pomoCategoryId);
+    base = `${habit.dailyTarget ?? "?"} ${cat?.name ?? "?"} sessions/day`;
   }
-  const cat = categories.find((c) => c.id === habit.pomoCategoryId);
-  return `${habit.dailyTarget ?? "?"} ${cat?.name ?? "?"} sessions/day`;
+  const weekdays = summarizeMask(habit.weekdayMask);
+  return weekdays ? `${base} · ${weekdays}` : base;
 }
 
 function SortableRow({

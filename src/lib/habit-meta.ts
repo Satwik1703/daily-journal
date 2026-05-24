@@ -45,3 +45,42 @@ export function isHabitDoneOnDate(
   if (dailyTarget == null || dailyTarget <= 0) return daySumOrCount > 0;
   return daySumOrCount >= dailyTarget;
 }
+
+// Phase 10: per-habit weekday visibility. 7-bit mask, bit i = JS getDay()
+// (Sun=0..Sat=6). 127 = all days; 65 = Sun+Sat (weekend); 62 = Mon-Fri.
+export const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+export const WEEKDAY_LABELS_FULL = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+] as const;
+export const WEEKDAY_MASK_ALL = 127;
+export const WEEKDAY_MASK_WEEKDAYS = 62; // Mon..Fri
+export const WEEKDAY_MASK_WEEKENDS = 65; // Sun + Sat
+
+export function isHabitActiveOnWeekday(mask: number, weekday: number): boolean {
+  return (mask & (1 << weekday)) !== 0;
+}
+
+export function weekdayMaskFromArray(bools: readonly boolean[]): number {
+  let m = 0;
+  for (let i = 0; i < 7; i++) if (bools[i]) m |= 1 << i;
+  return m;
+}
+
+export function arrayFromWeekdayMask(mask: number): boolean[] {
+  return Array.from({ length: 7 }, (_, i) => isHabitActiveOnWeekday(mask, i));
+}
+
+/**
+ * One-line summary of which weekdays a habit runs on, for UI subtitles.
+ * Returns "" when mask is 127 (all-days, no need to mention).
+ */
+export function summarizeMask(mask: number): string {
+  if (mask === WEEKDAY_MASK_ALL) return "";
+  if (mask === WEEKDAY_MASK_WEEKDAYS) return "Mon–Fri";
+  if (mask === WEEKDAY_MASK_WEEKENDS) return "Weekends";
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    if (isHabitActiveOnWeekday(mask, i)) days.push(WEEKDAY_LABELS[i]);
+  }
+  return days.join(", ");
+}

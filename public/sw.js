@@ -1,6 +1,6 @@
 // Habit Log service worker.
 // Bump VERSION on every deploy or you'll see stale shells on phones.
-const VERSION = "habit-log-v11";
+const VERSION = "habit-log-v12";
 const SHELL = ["/", "/journal", "/habits", "/pomodoro", "/goals", "/insights", "/gym", "/gym/insights", "/more", "/settings", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

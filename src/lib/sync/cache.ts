@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openSyncDB, type CachedPage } from "./db";
 
 const INVALIDATE_CHANNEL = "cache-invalidate";
@@ -67,21 +67,33 @@ export function useCachedPage<T>(
   fetcher: () => Promise<T>,
 ): T {
   const [data, setData] = useState<T>(initialServerData);
+  // Tracks the last-applied snapshot signature. Skipping setData when the
+  // fetched payload is byte-identical to what's already rendered prevents
+  // spurious re-renders from blowing away optimistic state in child
+  // components (e.g. TodayToggles' useOptimistic resync).
+  const lastSigRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
+    function applyIfChanged(next: T) {
+      const sig = JSON.stringify(next);
+      if (sig === lastSigRef.current) return;
+      lastSigRef.current = sig;
+      setData(next);
+    }
+
     async function loadFromIDB() {
       const cached = await getCachedPage<T>(key);
       if (cancelled || cached == null) return;
-      setData(cached);
+      applyIfChanged(cached);
     }
 
     async function refresh() {
       try {
         const fresh = await fetcher();
         if (cancelled) return;
-        setData(fresh);
+        applyIfChanged(fresh);
         await setCachedPage(key, fresh);
       } catch {
         /* keep current */

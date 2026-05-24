@@ -3,7 +3,6 @@
 import { useCachedPage } from "@/lib/sync/cache";
 import {
   formatPeriodRange,
-  isoWeekKey,
   periodKeyFor,
   todayLocal,
   type GoalPeriod,
@@ -59,7 +58,7 @@ export function GoalsPageClient({ period, anchor }: { period: GoalPeriod; anchor
   const today = todayLocal();
   const todayPeriodKey = periodKeyFor(today, period);
   const isCurrent = anchor === todayPeriodKey;
-  const todayWeekKey = isoWeekKey(today);
+  const todayWeekKey = periodKeyFor(today, "week");
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-24 space-y-5">
