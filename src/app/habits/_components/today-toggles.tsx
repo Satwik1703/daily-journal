@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useMemo, useOptimistic, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { customAlphabet } from "nanoid";
 import { Check, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -44,40 +44,97 @@ export function TodayToggles({
   /** Count of pomodoro_sessions on `anchor` per pomo-kind habit id. */
   pomoCountAtAnchor: Record<string, number>;
 }) {
-  // Memoize the useOptimistic base values on stable content keys. A fresh
-  // `new Set(doneIds)` / `valueAtAnchor` reference each render would make
-  // React's useOptimistic resync to "initial" and discard the optimistic
-  // patch — which silently revives the pre-tap state during the API
-  // round-trip and produces the perceived "waits for API" lag.
+  // ---- Local overlay state ---------------------------------------------------
+  // We deliberately do NOT use useOptimistic here. Its semantics — "patch
+  // applies only while a transition is pending" — meant the optimistic
+  // value evaporated the moment startTransition's sync body returned, and
+  // the UI flipped back until /api/sync committed + useCachedPage refetched.
+  // That round-trip is the 5s lag the user kept seeing.
+  //
+  // Instead, hold the overlay in plain useState. It persists across renders
+  // forever; a reconciliation effect drops entries once the freshly fetched
+  // server data confirms each optimistic change.
   const doneIdsKey = doneIds.join(",");
-  const initialDone = useMemo(
+  const serverDoneIds = useMemo(
     () => new Set(doneIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doneIdsKey],
   );
-  const [optimisticDone, setOptimisticDone] = useOptimistic(
-    initialDone,
-    (current: Set<string>, update: { id: string; done: boolean }) => {
-      const next = new Set(current);
-      if (update.done) next.add(update.id);
-      else next.delete(update.id);
-      return next;
-    },
+  const [doneOverlay, setDoneOverlay] = useState<Map<string, boolean>>(
+    () => new Map(),
   );
-  // Optimistic number-habit values keyed by habitId. Sums against server value.
+  // Number overlay tracks both the accumulated optimistic delta AND the
+  // server value at the moment we first started accumulating. Reconcile by
+  // dropping the entry once the server's reported sum catches up.
+  const [valueOverlay, setValueOverlay] = useState<
+    Map<string, { delta: number; baseline: number }>
+  >(() => new Map());
+
+  // Reconcile binary overlay against server.
+  useEffect(() => {
+    setDoneOverlay((m) => {
+      if (m.size === 0) return m;
+      const next = new Map(m);
+      let changed = false;
+      for (const [id, intended] of m) {
+        if (serverDoneIds.has(id) === intended) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : m;
+    });
+  }, [serverDoneIds]);
+
+  // Reconcile number overlay against server.
   const valuesKey = JSON.stringify(valueAtAnchor);
-  const stableValues = useMemo(
-    () => valueAtAnchor,
+  useEffect(() => {
+    setValueOverlay((m) => {
+      if (m.size === 0) return m;
+      const next = new Map(m);
+      let changed = false;
+      for (const [id, { delta, baseline }] of m) {
+        const currentServer = valueAtAnchor[id] ?? 0;
+        if (currentServer >= baseline + delta) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : m;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [valuesKey],
-  );
-  const [optimisticValues, applyValueDelta] = useOptimistic(
-    stableValues,
-    (current: Record<string, number>, update: { habitId: string; delta: number }) => ({
-      ...current,
-      [update.habitId]: (current[update.habitId] ?? 0) + update.delta,
-    }),
-  );
+  }, [valuesKey]);
+
+  function isDone(habitId: string): boolean {
+    if (doneOverlay.has(habitId)) return doneOverlay.get(habitId)!;
+    return serverDoneIds.has(habitId);
+  }
+
+  function valueFor(habitId: string): number {
+    const overlay = valueOverlay.get(habitId);
+    return (valueAtAnchor[habitId] ?? 0) + (overlay?.delta ?? 0);
+  }
+
+  function flipDone(habitId: string, next: boolean) {
+    setDoneOverlay((m) => {
+      const map = new Map(m);
+      map.set(habitId, next);
+      return map;
+    });
+  }
+
+  function addValue(habitId: string, delta: number) {
+    setValueOverlay((m) => {
+      const map = new Map(m);
+      const existing = map.get(habitId);
+      const baseline = existing?.baseline ?? (valueAtAnchor[habitId] ?? 0);
+      map.set(habitId, {
+        delta: (existing?.delta ?? 0) + delta,
+        baseline,
+      });
+      return map;
+    });
+  }
 
   return (
     <Card>
@@ -93,16 +150,18 @@ export function TodayToggles({
       </CardHeader>
       <CardContent className="space-y-2">
         {habits.map((h) => {
-          const done = optimisticDone.has(h.id);
+          const done = isDone(h.id);
           const kind = h.trackingKind as HabitTrackingKind;
           if (kind === "binary") {
             return (
               <BinaryRow
                 key={h.id}
                 habit={h}
-                anchor={anchor}
                 done={done}
-                onOptimistic={(next) => setOptimisticDone({ id: h.id, done: next })}
+                onFlip={(next) => {
+                  flipDone(h.id, next);
+                  void mutate("toggle_habit", { habitId: h.id, date: anchor });
+                }}
               />
             );
           }
@@ -113,8 +172,8 @@ export function TodayToggles({
                 habit={h}
                 anchor={anchor}
                 done={done}
-                valueToday={optimisticValues[h.id] ?? 0}
-                onLogValue={(delta) => applyValueDelta({ habitId: h.id, delta })}
+                valueToday={valueFor(h.id)}
+                onLogValue={(delta) => addValue(h.id, delta)}
               />
             );
           }
@@ -137,25 +196,18 @@ export function TodayToggles({
 
 function BinaryRow({
   habit,
-  anchor,
   done,
-  onOptimistic,
+  onFlip,
 }: {
   habit: Habit;
-  anchor: string;
   done: boolean;
-  onOptimistic: (next: boolean) => void;
+  onFlip: (next: boolean) => void;
 }) {
   return (
     <button
       type="button"
       aria-pressed={done}
-      onClick={() => {
-        startTransition(() => {
-          onOptimistic(!done);
-          void mutate("toggle_habit", { habitId: habit.id, date: anchor });
-        });
-      }}
+      onClick={() => onFlip(!done)}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-all active:scale-[0.99]",
         done ? "border-transparent text-foreground" : "border-border hover:bg-muted/40",
@@ -192,8 +244,6 @@ function NumberRow({
   onLogValue: (delta: number) => void;
 }) {
   const target = habit.dailyTarget ?? 0;
-  // Recompute done locally in case the snapshot was computed before this
-  // session's optimistic edits (e.g. a quick double-log).
   const trulyDone = isHabitDoneOnDate("number", target || null, valueToday, false) || done;
 
   return (
@@ -242,9 +292,7 @@ function LogValueButton({
       toast.error("Enter a non-zero number");
       return;
     }
-    startTransition(() => {
-      onLogged(n);
-    });
+    onLogged(n);
     void mutate("log_habit_value", {
       id: valueLogId(),
       habitId,

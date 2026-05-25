@@ -32,6 +32,8 @@ export function ExerciseCard({
   onLocalSets,
   removable,
   onRemove,
+  onSetDirty,
+  onSetFlushed,
 }: {
   date: string;
   workoutId: string;
@@ -42,6 +44,8 @@ export function ExerciseCard({
   onLocalSets: (next: SetWithFlags[]) => void;
   removable?: boolean;
   onRemove?: () => void;
+  onSetDirty?: (id: string) => void;
+  onSetFlushed?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -188,6 +192,8 @@ export function ExerciseCard({
                   isPR={s.isPR}
                   onUpdate={(p) => updateSet(s.id, p)}
                   onDelete={() => deleteSet(s.id)}
+                  onDirty={onSetDirty}
+                  onFlushed={onSetFlushed}
                 />
               ))}
             </div>

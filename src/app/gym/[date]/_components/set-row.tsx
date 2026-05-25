@@ -8,6 +8,7 @@ import type { WorkoutSet } from "@/lib/gym-meta";
 
 const WEIGHT_STEP = 2.5;
 const REPS_STEP = 5;
+const DEBOUNCE_MS = 800;
 
 export function SetRow({
   set,
@@ -15,17 +16,74 @@ export function SetRow({
   isPR,
   onUpdate,
   onDelete,
+  onDirty,
+  onFlushed,
 }: {
   set: WorkoutSet;
   perHand: boolean;
   isPR?: boolean;
   onUpdate: (patch: Partial<WorkoutSet>) => void;
   onDelete: () => void;
+  onDirty?: (id: string) => void;
+  onFlushed?: (id: string) => void;
 }) {
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatchRef = useRef<Partial<WorkoutSet>>({});
+  // Stable refs so the unmount/visibility effects don't need to re-bind
+  // every render. setId capture for the flush hand-shake. Refs sync inside
+  // an effect (lint rule: no ref writes during render).
+  const setIdRef = useRef(set.id);
+  const onFlushedRef = useRef(onFlushed);
+  useEffect(() => {
+    setIdRef.current = set.id;
+    onFlushedRef.current = onFlushed;
+  });
+
+  function flush() {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const patch = pendingPatchRef.current;
+    pendingPatchRef.current = {};
+    if (Object.keys(patch).length === 0) return;
+    void mutate("update_set", { id: setIdRef.current, ...patch });
+    onFlushedRef.current?.(setIdRef.current);
+  }
+
   function persist(patch: { reps?: number | null; weightKg?: number | null }) {
     onUpdate(patch);
-    void mutate("update_set", { id: set.id, ...patch });
+    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+    onDirty?.(set.id);
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(flush, DEBOUNCE_MS);
   }
+
+  // Flush on unmount (card collapse, row delete, page nav).
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      const patch = pendingPatchRef.current;
+      pendingPatchRef.current = {};
+      if (Object.keys(patch).length === 0) return;
+      void mutate("update_set", { id: setIdRef.current, ...patch });
+      onFlushedRef.current?.(setIdRef.current);
+    };
+  }, []);
+
+  // Flush when tab goes to background — keeps prod data fresh even if user
+  // backgrounds the app mid-edit.
+  useEffect(() => {
+    function onHidden() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    document.addEventListener("visibilitychange", onHidden);
+    return () => document.removeEventListener("visibilitychange", onHidden);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function stepWeight(delta: number) {
     const current = set.weightKg;
@@ -65,7 +123,10 @@ export function SetRow({
         decimal
         step={WEIGHT_STEP}
         onStep={stepWeight}
-        onCommit={(n) => persist({ weightKg: n })}
+        onCommit={(n) => {
+          persist({ weightKg: n });
+          flush();
+        }}
         accent={perHand ? "amber" : "default"}
       />
 
@@ -76,7 +137,10 @@ export function SetRow({
         suffix="reps"
         step={REPS_STEP}
         onStep={stepReps}
-        onCommit={(n) => persist({ reps: n })}
+        onCommit={(n) => {
+          persist({ reps: n });
+          flush();
+        }}
       />
 
       <div className="ml-auto flex items-center gap-1">

@@ -1,7 +1,7 @@
 "use client";
 
 import { customAlphabet } from "nanoid";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -99,13 +99,32 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
   const [sets, setSets] = useState<WorkoutSet[]>(data.sets);
   const [extraExerciseIds, setExtraExerciseIds] = useState<string[]>([]);
 
-  // Sync optimistic state when server data arrives
+  // Track sets with locally-pending edits that haven't flushed to /api/sync
+  // yet. Reset by the SetRow flush hand-shake (onSetFlushed).
+  const dirtySetIdsRef = useRef<Set<string>>(new Set());
+  const markSetDirty = useCallback((id: string) => {
+    dirtySetIdsRef.current.add(id);
+  }, []);
+  const markSetFlushed = useCallback((id: string) => {
+    dirtySetIdsRef.current.delete(id);
+  }, []);
+
+  // Sync optimistic state when server data arrives. Crucially, keep local
+  // state for any set whose mutate is still queued — otherwise a refetch
+  // that lands while the user is hammering the stepper would briefly
+  // roll back the visible value to the last server commit.
   useEffect(() => {
     if (data.workout?.id && data.workout.id !== workoutId) setWorkoutId(data.workout.id);
     if (data.workout?.splitId !== undefined && data.workout.splitId !== splitId) {
       setSplitId(data.workout?.splitId ?? null);
     }
-    setSets(data.sets);
+    setSets((prev) => {
+      if (dirtySetIdsRef.current.size === 0) return data.sets;
+      const localById = new Map(prev.map((s) => [s.id, s]));
+      return data.sets.map((s) =>
+        dirtySetIdsRef.current.has(s.id) ? (localById.get(s.id) ?? s) : s,
+      );
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.workout?.id, data.workout?.splitId, data.sets]);
 
@@ -258,6 +277,8 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
               sets={setsByExercise.get(ex.id) ?? []}
               prefill={data.prefill[ex.id] ?? { reps: null, weightKg: null }}
               progression={data.progressionSuggestions?.[ex.id]}
+              onSetDirty={markSetDirty}
+              onSetFlushed={markSetFlushed}
               onLocalSets={(next) =>
                 setSets((all) => {
                   const others = all.filter((s) => s.exerciseId !== ex.id);

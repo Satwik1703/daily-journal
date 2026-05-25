@@ -1183,10 +1183,64 @@ Commit: `9a63a3b`. Deployed.
 
 ---
 
+## ✅ Phase 11 — kill the lingering 5s lag on /habits + batch gym stepper writes
+
+Plan: `C:\Users\Admin\.claude\plans\couple-of-things-we-indexed-grove.md`. Shipped 2026-05-26.
+
+### Why
+
+User reported, after Phase 8/8B/8C/8C.1 "instant UI", that tapping a habit on `/habits` still waited ~5s before flipping to done, and that every `+`/`-` click on a gym stepper fired its own `update_set` POST. Asked "what did Phase 8 even do?" — turns out the plumbing was right, but two real bugs neutralized the benefit on those two surfaces.
+
+### Root causes
+
+1. **`useOptimistic` semantics** in `src/app/habits/_components/today-toggles.tsx`. The tap handler ran `startTransition(() => { onOptimistic(!done); void mutate("toggle_habit", ...); })`. The `startTransition` body was fully synchronous (`void mutate` is fire-and-forget), so the transition resolved on the next paint, React 19's `useOptimistic` patch evaporated, and the UI flipped back to the base prop until `/api/sync` POST + `useCachedPage` refetch landed — the full Turso round-trip. The existing `useMemo` on `doneIds.join(",")` stabilized the base set but couldn't fix the "optimistic ends with the transition" semantics. Same bug applied to the number-row delta.
+2. **Per-stepper-click mutate spam in gym** (`src/app/gym/[date]/_components/set-row.tsx`). Each `+`/`-` click fired its own `mutate("update_set")`. Five clicks → five queued POSTs → five cache-invalidate broadcasts → five `useCachedPage` refetches piling up. Local UI did update instantly via `onLocalSets`, but the parade of refetches plus `gym-page-client.tsx`'s unconditional `setSets(data.sets)` on every `data.sets` ref change could briefly roll back any edit whose mutate hadn't flushed.
+
+### Shipped
+
+**Slice 1 — `src/app/habits/_components/today-toggles.tsx`.** Dropped `useOptimistic` entirely. Replaced with a plain `useState<Map>` overlay pattern that persists across renders forever:
+- `doneOverlay: Map<habitId, boolean>` — binary intent.
+- `valueOverlay: Map<habitId, { delta, baseline }>` — number-kind accumulated delta with the server baseline at the moment we started accumulating.
+- Reconciliation `useEffect` per overlay drops entries once the freshly-fetched server data confirms each change (binary: `serverDoneIds.has(id) === intended`; number: `currentServer >= baseline + delta`).
+- Tap → `setOverlay(...)` + `void mutate(...)`. No `startTransition` anymore.
+
+**Slice 2 — `src/app/gym/[date]/_components/set-row.tsx`.** Per-set 800ms debounce. `pendingPatchRef` accumulates the latest `{reps, weightKg}` patch; `flushTimerRef` resets on every click. `flush()` fires ONE `mutate("update_set", { id, ...patch })` after idle, on input blur (`onCommit`), on unmount (card collapse / nav / delete), and on `visibilitychange:hidden`. Signals parent via the new `onFlushed(id)` callback. Stale-id `update_set` after a `delete_set` is a no-op silent `UPDATE 0` per `gym.ts:442`, so the unmount-flush race with delete is harmless.
+
+**Slice 3 — `src/app/gym/[date]/_components/gym-page-client.tsx` + `exercise-card.tsx`.** Added `dirtySetIdsRef: Set<string>` lifted to the page. Threaded `onSetDirty`/`onSetFlushed` callbacks through `ExerciseCard` → `SetRow`. Refetch `useEffect` now merges: server-data for clean ids, kept-local-data for any id with a still-queued edit. No mid-edit rollback.
+
+**Slice 4 — `goal-card-number.tsx`.** Verified — already uses plain `useState`, no `useOptimistic`. No edit needed.
+
+### What did NOT change
+
+- `mutate()` / `queue.ts` / `cache.ts` / `/api/sync` / `/api/page/*` plumbing — Phase 8 infra is correct.
+- Journal autosave (`journal-form.tsx`) — already optimistic via plain `useState` + 1.5s debounce.
+- Journal tasks (`tasks-block.tsx`) — already plain-state overlays (`optimisticAdded`, `hiddenIds`).
+- Pomodoro timer-panel, manual-session-dialog, session-list — already fire-and-forget.
+- Goals action menu, pin toggle, log-progress dialog — already fire-and-forget.
+- Schema / migrations / seeds.
+- PWA shell — no SW behavior change, no `VERSION` bump.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 40 warnings (existing `react-hooks/set-state-in-effect` exemption pattern).
+- `npm run build` clean — 22 routes unchanged.
+- Local probes at `http://localhost:3000`: `/habits/2026-05-26` 200, `/gym/2026-05-26` 200, `/api/page/habits/2026-05-26` 200, `/api/page/gym/2026-05-26` 200.
+- User to eyeball on Slow 3G / phone: (1) habit binary tap stays done; (2) `Log` dialog updates row + donut instantly; (3) DevTools Network filter `sync` shows exactly ONE POST per 800ms idle window after stepper hammering; (4) blur or unmount flushes immediately.
+
+### Deploy
+
+1. `git push origin main`.
+2. No schema migration.
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. PWA stays on `habit-log-v10`.
+
+---
+
 ## 📌 Resume here for the next session
 
-**State at session end (2026-05-24):**
-- Working tree clean. `git log -1` → `9a63a3b remove undo-toast hold`.
+**State at session end (2026-05-26):**
+- Working tree clean after the Phase 11 commit.
 - Live: https://daily-journal-phi-vert.vercel.app (Vercel + Turso `aws-ap-south-1`).
 - PWA shell `habit-log-v10`.
 - Local DB seeded with the canonical 16-habit stack (14 from Phase 6 + Protein + Hand grip from Phase 7C).
