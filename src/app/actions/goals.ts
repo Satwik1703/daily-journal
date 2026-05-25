@@ -326,6 +326,56 @@ async function createCascadeChildren(opts: {
  * Returns the topmost parent id (yearGoalId if any, else the first monthly
  * parent id) so the caller can revalidate / route off it.
  */
+/**
+ * Load every (period, periodKey) currently held by an active goal that matches
+ * the cascade-tree's identity (same habitId if linked, else same title) and
+ * lives in or after `fromKey`. Used to skip duplicates inside both
+ * createReverseCascade and extendReverseCascade so re-running them never
+ * creates parallel hierarchies.
+ */
+async function loadExistingCascadeKeys(opts: {
+  title: string;
+  habitId: string | null;
+  pomoCategoryId: string | null;
+  fromYear: string;
+}): Promise<{
+  hasYearly: { id: string; periodKey: string } | null;
+  monthByKey: Map<string, string>; // monthKey -> goalId
+  weekKeys: Set<string>;
+}> {
+  // Heuristic identity: habit-linked goals match by habitId; everything else
+  // matches by exact title (case-sensitive). That mirrors how user re-creates
+  // the same cascade — they type the same title or pick the same habit.
+  const matchClauses = opts.habitId
+    ? eq(goals.habitId, opts.habitId)
+    : eq(goals.title, opts.title);
+
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(
+      and(
+        matchClauses,
+        isNull(goals.archivedAt),
+        // Limit to current year + later so unrelated past trees don't trip us.
+      ),
+    );
+
+  let hasYearly: { id: string; periodKey: string } | null = null;
+  const monthByKey = new Map<string, string>();
+  const weekKeys = new Set<string>();
+  for (const r of rows) {
+    if (r.period === "year" && r.periodKey >= opts.fromYear) {
+      hasYearly = { id: r.id, periodKey: r.periodKey };
+    } else if (r.period === "month" && r.periodKey.slice(0, 4) >= opts.fromYear) {
+      monthByKey.set(r.periodKey, r.id);
+    } else if (r.period === "week" && r.periodKey.slice(0, 4) >= opts.fromYear) {
+      weekKeys.add(r.periodKey);
+    }
+  }
+  return { hasYearly, monthByKey, weekKeys };
+}
+
 async function createReverseCascade(opts: {
   currentWeekKey: string;
   endKind: "endOfMonth" | "endOfYear";
@@ -342,6 +392,26 @@ async function createReverseCascade(opts: {
 }): Promise<{ id: string; weekCount: number; monthCount: number; yearCount: number }> {
   const weekKeys = enumerateWeeksThrough(opts.currentWeekKey, opts.endKind, opts.endRef);
   if (weekKeys.length === 0) throw new Error("No weeks in horizon");
+
+  // De-dup pre-flight. If a yearly parent for the same identity already exists
+  // for this year, refuse — the user almost certainly didn't mean to start a
+  // second parallel hierarchy. They can use Extend instead.
+  const yearOfCurrent = opts.currentWeekKey.slice(0, 4);
+  const existing = await loadExistingCascadeKeys({
+    title: opts.title,
+    habitId: opts.habitId,
+    pomoCategoryId: opts.pomoCategoryId,
+    fromYear: yearOfCurrent,
+  });
+  if (
+    opts.endKind === "endOfYear" &&
+    existing.hasYearly &&
+    existing.hasYearly.periodKey === opts.endRef
+  ) {
+    throw new Error(
+      `Already extended through ${opts.endRef}. Use Extend instead.`,
+    );
+  }
 
   // Group weeks by their Thursday's month (ISO convention — matches
   // createCascadeChildren's enumeration so the same week never lands in two
@@ -371,9 +441,11 @@ async function createReverseCascade(opts: {
     status: "active" as const,
   };
 
-  let yearGoalId: string | null = null;
+  // Yearly: reuse an existing yearly row when present (e.g. extending after a
+  // prior endOfMonth call), otherwise create one.
+  let yearGoalId: string | null = existing.hasYearly?.id ?? null;
   let yearCount = 0;
-  if (opts.endKind === "endOfYear") {
+  if (opts.endKind === "endOfYear" && !yearGoalId) {
     const yearKey = opts.endRef;
     const yearTarget = opts.weeklyTarget * weekKeys.length;
     yearGoalId = nanoid(12);
@@ -390,9 +462,16 @@ async function createReverseCascade(opts: {
     yearCount = 1;
   }
 
-  // Monthly parents — one per month, target = sum of weeks in that month
+  // Monthly parents — one per month, target = sum of weeks in that month.
+  // Skip any month we've already created (de-dup map).
   const monthlyParentIdByMonth = new Map<string, string>();
+  let monthCount = 0;
   for (const [monthKey, weeksInMonth] of monthsToWeeks) {
+    const existingMonthId = existing.monthByKey.get(monthKey);
+    if (existingMonthId) {
+      monthlyParentIdByMonth.set(monthKey, existingMonthId);
+      continue;
+    }
     const monthGoalId = nanoid(12);
     const monthTarget = opts.weeklyTarget * weeksInMonth.length;
     const position = await nextPositionFor("month", monthKey);
@@ -406,10 +485,13 @@ async function createReverseCascade(opts: {
       position,
     });
     monthlyParentIdByMonth.set(monthKey, monthGoalId);
+    monthCount++;
   }
 
-  // Weekly clones — link to their month
+  // Weekly clones — link to their month. Skip weeks already represented.
+  let weekCount = 0;
   for (const wk of weekKeys) {
+    if (existing.weekKeys.has(wk)) continue;
     const wkRange = periodRangeFor(wk, "week");
     const monthKey = addDays(wkRange.start, 4).slice(0, 7);
     const parentId = monthlyParentIdByMonth.get(monthKey)!;
@@ -423,14 +505,208 @@ async function createReverseCascade(opts: {
       targetValue: opts.weeklyTarget,
       position,
     });
+    weekCount++;
   }
 
   return {
     id: yearGoalId ?? Array.from(monthlyParentIdByMonth.values())[0],
-    weekCount: weekKeys.length,
-    monthCount: monthsToWeeks.size,
+    weekCount,
+    monthCount,
     yearCount,
   };
+}
+
+/**
+ * Extend an existing reverse-cascade tree. Loads the tree's root, enumerates
+ * the missing weeks through the new horizon, and inserts only the missing
+ * rows (idempotent via loadExistingCascadeKeys). Reuses the same identity
+ * heuristic as createReverseCascade.
+ */
+export async function extendReverseCascade(input: {
+  rootGoalId: string;
+  through: "endOfMonth" | "endOfYear";
+  monthKey?: string;
+}): Promise<{ addedWeeks: number; addedMonths: number }> {
+  const root = await findGoalById(input.rootGoalId);
+  if (!root) throw new Error("root goal not found");
+
+  // Walk up to the topmost ancestor.
+  let topmost = root;
+  while (topmost.parentId) {
+    const next = await findGoalById(topmost.parentId);
+    if (!next) break;
+    topmost = next;
+  }
+  if (topmost.period === "week") {
+    throw new Error("Source goal has no monthly/yearly parent — re-create as a Repeat instead");
+  }
+  if (topmost.type === "milestone") {
+    throw new Error("Milestone trees can't be extended");
+  }
+
+  const currentWeekKey = periodKeyFor(todayLocal(), "week");
+  let endRef: string;
+  if (input.through === "endOfMonth") {
+    if (!input.monthKey || !/^\d{4}-(0[1-9]|1[0-2])$/.test(input.monthKey)) {
+      throw new Error("monthKey must be YYYY-MM for endOfMonth");
+    }
+    endRef = input.monthKey;
+  } else {
+    endRef = currentWeekKey.slice(0, 4);
+  }
+
+  // Read weeklyTarget by inspecting any existing weekly clone in the tree;
+  // fall back to topmost target / known weeks if none exists yet.
+  const anyWeekly = await db
+    .select()
+    .from(goals)
+    .where(
+      and(
+        topmost.habitId ? eq(goals.habitId, topmost.habitId) : eq(goals.title, topmost.title),
+        eq(goals.period, "week"),
+        isNull(goals.archivedAt),
+      ),
+    )
+    .orderBy(asc(goals.periodKey))
+    .limit(1);
+  const weeklyTarget =
+    anyWeekly[0]?.targetValue ?? topmost.targetValue ?? 0;
+  if (weeklyTarget <= 0) throw new Error("Couldn't infer weekly target from tree");
+
+  const before = await loadExistingCascadeKeys({
+    title: topmost.title,
+    habitId: topmost.habitId,
+    pomoCategoryId: topmost.pomoCategoryId,
+    fromYear: currentWeekKey.slice(0, 4),
+  });
+
+  const { weekCount, monthCount } = await createReverseCascadeForExtend({
+    currentWeekKey,
+    endKind: input.through,
+    endRef,
+    title: topmost.title,
+    emoji: topmost.emoji,
+    color: topmost.color,
+    type: topmost.type as GoalType,
+    weeklyTarget,
+    unit: topmost.unit,
+    habitId: topmost.habitId,
+    pomoCategoryId: topmost.pomoCategoryId,
+    pomoMetric: topmost.pomoMetric as PomoMetric | null,
+    existing: before,
+  });
+
+  revalidateGoals();
+  return { addedWeeks: weekCount, addedMonths: monthCount };
+}
+
+/**
+ * Internal-only variant of createReverseCascade that takes a precomputed
+ * `existing` map instead of doing the throw-on-duplicate-yearly check. This
+ * is what extendReverseCascade calls so re-running it after the tree already
+ * exists doesn't error — it just fills the gaps.
+ */
+async function createReverseCascadeForExtend(opts: {
+  currentWeekKey: string;
+  endKind: "endOfMonth" | "endOfYear";
+  endRef: string;
+  title: string;
+  emoji: string | null;
+  color: string;
+  type: GoalType;
+  weeklyTarget: number;
+  unit: string | null;
+  habitId: string | null;
+  pomoCategoryId: string | null;
+  pomoMetric: PomoMetric | null;
+  existing: Awaited<ReturnType<typeof loadExistingCascadeKeys>>;
+}): Promise<{ weekCount: number; monthCount: number }> {
+  const weekKeys = enumerateWeeksThrough(opts.currentWeekKey, opts.endKind, opts.endRef);
+  if (weekKeys.length === 0) return { weekCount: 0, monthCount: 0 };
+
+  const monthsToWeeks = new Map<string, string[]>();
+  for (const wk of weekKeys) {
+    const wkRange = periodRangeFor(wk, "week");
+    const thursday = addDays(wkRange.start, 4);
+    const monthKey = thursday.slice(0, 7);
+    let arr = monthsToWeeks.get(monthKey);
+    if (!arr) {
+      arr = [];
+      monthsToWeeks.set(monthKey, arr);
+    }
+    arr.push(wk);
+  }
+
+  const shared = {
+    title: opts.title,
+    emoji: opts.emoji,
+    color: opts.color,
+    type: opts.type,
+    unit: opts.unit,
+    habitId: opts.habitId,
+    pomoCategoryId: opts.pomoCategoryId,
+    pomoMetric: opts.pomoMetric,
+    status: "active" as const,
+  };
+
+  let yearGoalId: string | null = opts.existing.hasYearly?.id ?? null;
+  if (opts.endKind === "endOfYear" && !yearGoalId) {
+    yearGoalId = nanoid(12);
+    const position = await nextPositionFor("year", opts.endRef);
+    await db.insert(goals).values({
+      ...shared,
+      id: yearGoalId,
+      period: "year",
+      periodKey: opts.endRef,
+      parentId: null,
+      targetValue: opts.weeklyTarget * weekKeys.length,
+      position,
+    });
+  }
+
+  const monthlyParentIdByMonth = new Map<string, string>();
+  let monthCount = 0;
+  for (const [monthKey, weeksInMonth] of monthsToWeeks) {
+    const existingMonthId = opts.existing.monthByKey.get(monthKey);
+    if (existingMonthId) {
+      monthlyParentIdByMonth.set(monthKey, existingMonthId);
+      continue;
+    }
+    const monthGoalId = nanoid(12);
+    const position = await nextPositionFor("month", monthKey);
+    await db.insert(goals).values({
+      ...shared,
+      id: monthGoalId,
+      period: "month",
+      periodKey: monthKey,
+      parentId: yearGoalId,
+      targetValue: opts.weeklyTarget * weeksInMonth.length,
+      position,
+    });
+    monthlyParentIdByMonth.set(monthKey, monthGoalId);
+    monthCount++;
+  }
+
+  let weekCount = 0;
+  for (const wk of weekKeys) {
+    if (opts.existing.weekKeys.has(wk)) continue;
+    const wkRange = periodRangeFor(wk, "week");
+    const monthKey = addDays(wkRange.start, 4).slice(0, 7);
+    const parentId = monthlyParentIdByMonth.get(monthKey)!;
+    const position = await nextPositionFor("week", wk);
+    await db.insert(goals).values({
+      ...shared,
+      id: nanoid(12),
+      period: "week",
+      periodKey: wk,
+      parentId,
+      targetValue: opts.weeklyTarget,
+      position,
+    });
+    weekCount++;
+  }
+
+  return { weekCount, monthCount };
 }
 
 function enumerateChildKeys(

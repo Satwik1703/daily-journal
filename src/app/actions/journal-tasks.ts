@@ -108,7 +108,8 @@ export async function moveJournalTask(input: {
 
   // Leave a trace stub on the original date.
   // Format: "{originalText} → Moved to {Month DD}". Excerpted to keep the
-  // row compact when the task text is long.
+  // row compact when the task text is long. `movedToDate` lets TraceRow be
+  // a Link without parsing the human-readable text.
   const excerpt =
     row.text.length > TRACE_EXCERPT_MAX
       ? row.text.slice(0, TRACE_EXCERPT_MAX - 1) + "…"
@@ -121,9 +122,42 @@ export async function moveJournalTask(input: {
     text: `${excerpt}${TASK_TRACE_MARKER}${formatShortDate(input.newDate)}`,
     done: true,
     position: tracePosition,
+    movedToDate: input.newDate,
   });
 
   revalidatePath(`/journal/${row.date}`);
   revalidatePath(`/journal/${input.newDate}`);
   return { ok: true };
+}
+
+/**
+ * Persist a new ordering for tasks within a single (date, kind) group.
+ * Array index becomes the `position` value. Validates every id belongs to
+ * the given date + kind so the user can't accidentally reorder across kinds
+ * (move-task is the operation for that).
+ */
+export async function reorderTasks(input: {
+  date: string;
+  kind: string;
+  orderedIds: string[];
+}): Promise<void> {
+  if (!isValidDateString(input.date)) throw new Error(`Invalid date: ${input.date}`);
+  const kind = sanitizeKind(input.kind);
+  if (!Array.isArray(input.orderedIds)) throw new Error("orderedIds must be an array");
+  const seen = new Set<string>();
+  for (const id of input.orderedIds) {
+    if (typeof id !== "string" || !id) throw new Error("invalid id in orderedIds");
+    if (seen.has(id)) throw new Error("duplicate id in orderedIds");
+    seen.add(id);
+  }
+  if (input.orderedIds.length === 0) return;
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < input.orderedIds.length; i++) {
+      await tx
+        .update(journalTasks)
+        .set({ position: i })
+        .where(eq(journalTasks.id, input.orderedIds[i]));
+    }
+  });
+  revalidatePath(`/journal/${input.date}`);
 }

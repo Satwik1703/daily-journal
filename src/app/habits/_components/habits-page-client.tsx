@@ -8,8 +8,9 @@ import { HabitList } from "./habit-list";
 import { AddHabitButton } from "./add-habit-button";
 import { HabitsProgressCard } from "./habits-progress-card";
 import { HabitsDateStepper } from "../[date]/_components/habits-date-stepper";
-import type { Habit } from "@/db/queries/habits";
+import type { Habit, HabitValueLogRow } from "@/db/queries/habits";
 import type { PomoCategory } from "@/db/queries/pomodoro-categories";
+import type { Book } from "@/db/queries/books";
 
 type PageData = {
   snapshot: {
@@ -28,6 +29,10 @@ type PageData = {
   windowValuesRecord: Record<string, Record<string, number>>;
   windowPomoRecord: Record<string, Record<string, number>>;
   windowLogsRecord: Record<string, string[]>;
+  valueLogsByHabit: Record<string, HabitValueLogRow[]>;
+  xpByHabit: Record<string, number>;
+  readingBooks: Book[];
+  activeBookId: string | null;
 };
 
 export function HabitsPageClient({ date }: { date: string }) {
@@ -79,6 +84,10 @@ export function HabitsPageClient({ date }: { date: string }) {
             doneIds={data.snapshot.doneOnAnchorIds}
             valueAtAnchor={data.valueAtAnchor}
             pomoCountAtAnchor={data.pomoCountAtAnchor}
+            valueLogsByHabit={data.valueLogsByHabit}
+            xpByHabit={data.xpByHabit}
+            readingBooks={data.readingBooks}
+            activeBookId={data.activeBookId}
           />
           <HabitGrid
             habits={data.snapshot.activeAll ?? data.snapshot.active}
@@ -93,6 +102,7 @@ export function HabitsPageClient({ date }: { date: string }) {
             active={data.snapshot.activeAll ?? data.snapshot.active}
             archived={data.snapshot.archived}
             categories={data.pomoCategories}
+            xpByHabit={data.xpByHabit}
           />
         </>
       )}

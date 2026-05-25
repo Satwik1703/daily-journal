@@ -81,6 +81,13 @@ function sanitizeWeekdayMask(raw: unknown): number {
   return n;
 }
 
+function sanitizeDifficulty(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) throw new Error("difficulty must be a number");
+  if (n < 0.1 || n > 5) throw new Error("difficulty must be 0.1..5");
+  return n;
+}
+
 async function assertCategoryExists(id: string): Promise<void> {
   const rows = await db
     .select({ id: pomodoroCategories.id })
@@ -100,6 +107,7 @@ export async function createHabit(input: {
   unit?: string | null;
   pomoCategoryId?: string | null;
   weekdayMask?: number;
+  difficulty?: number;
 }): Promise<{ id: string }> {
   const name = sanitizeName(input.name);
   const emoji = sanitizeEmoji(input.emoji);
@@ -109,6 +117,7 @@ export async function createHabit(input: {
   const unit = sanitizeUnit(input.unit);
   const pomoCategoryId = input.pomoCategoryId ?? null;
   const weekdayMask = input.weekdayMask == null ? 127 : sanitizeWeekdayMask(input.weekdayMask);
+  const difficulty = input.difficulty == null ? 1.0 : sanitizeDifficulty(input.difficulty);
 
   if (trackingKind === "number" && (dailyTarget == null || dailyTarget <= 0)) {
     throw new Error("Number habits need a positive daily target");
@@ -136,6 +145,7 @@ export async function createHabit(input: {
     unit: trackingKind === "number" ? unit : null,
     pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
     weekdayMask,
+    difficulty,
     position,
   });
   revalidatePath("/habits", "layout");
@@ -155,6 +165,7 @@ export async function updateHabit(input: {
   unit?: string | null;
   pomoCategoryId?: string | null;
   weekdayMask?: number;
+  difficulty?: number;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
   const patch: Record<string, unknown> = {};
@@ -174,6 +185,9 @@ export async function updateHabit(input: {
   }
   if (input.weekdayMask !== undefined) {
     patch.weekdayMask = sanitizeWeekdayMask(input.weekdayMask);
+  }
+  if (input.difficulty !== undefined) {
+    patch.difficulty = sanitizeDifficulty(input.difficulty);
   }
   if (Object.keys(patch).length === 0) return;
   await db.update(habits).set(patch).where(eq(habits.id, input.id));
@@ -277,6 +291,7 @@ export async function logHabitValue(input: {
   value: number;
   date?: string;
   note?: string | null;
+  bookId?: string | null;
 }): Promise<{ id: string }> {
   if (!input.habitId) throw new Error("habitId is required");
   const habit = await findHabitById(input.habitId);
@@ -297,9 +312,11 @@ export async function logHabitValue(input: {
     date,
     value,
     note: sanitizeNote(input.note),
+    bookId: input.bookId ?? null,
   });
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
+  revalidatePath("/books", "layout");
   return { id };
 }
 

@@ -1237,28 +1237,99 @@ User reported, after Phase 8/8B/8C/8C.1 "instant UI", that tapping a habit on `/
 
 ---
 
+## ✅ Phase 11.1 — Polish + delight pass (Goals · Habits XP/gamify · Tasks · Insights heatmap · Books)
+
+Plan: `C:\Users\Admin\.claude\plans\couple-of-things-we-indexed-grove.md`. Shipped 2026-05-26.
+
+Big bundle that closes a year's worth of "deferred to X.1+" notes plus drops two brand-new features (XP/levels + reading log).
+
+### Schema migration `0010_books_xp_trace.sql`
+- `habits.difficulty real NOT NULL DEFAULT 1.0`
+- `journal_tasks.moved_to_date text` (nullable; structured trace pointer)
+- New `books` table: id/title/author/total_pages/started_at/finished_at/rating/notes/status/color/position/created_at + `books_status` index
+- `habit_value_logs.book_id text REFERENCES books(id) ON DELETE SET NULL` + `habit_value_logs_book` index
+
+### Slice A — Goals reverse-cascade hygiene
+- `createReverseCascade` got de-dup via new `loadExistingCascadeKeys` helper (by habitId OR title, scoped to current+future years). Refuses if a yearly parent already exists for the same identity/year.
+- New `extendReverseCascade({ rootGoalId, through })` action — walks to topmost ancestor, enumerates missing weeks through end-of-year / specified month, inserts only the gaps. Backed by an internal `createReverseCascadeForExtend` that takes a pre-computed existing-map.
+- New lazy auto-extend in `getGoalsForPeriod`: on every week-period read, every yearly reverse-cascade tree gets pushed forward by ONE week if its latest weekly clone is behind. Self-heals on Sunday navigation; no cron.
+- New "Extend through year" item in `GoalActionsMenu` (kebab) for non-milestone goals → calls `extend_reverse_cascade` mutation.
+- "Regenerate children" toggle backlog item closed as design — `updateGoalCascade` continues to always auto-rebalance (matches user intent in practice).
+- Pin button reposition dropped per user — existing `right-2 top-2` layout stays.
+
+### Slice B — Habits XP + gamification + partial-fill grid + deltas history
+- `src/lib/habit-meta.ts`: new `hexToRgba` (lifted), `computeRowRatio`, `computeCellFill` (returns `React.CSSProperties` with a 2-stop `linear-gradient(to top, bright pct%, faint pct%)` so the rolling grid cells show a clear battery-style cutoff line at the actual ratio, layered on the opacity tint), `LEVEL_THRESHOLDS` (10 levels: 0, 50, 150, 300, 600, 1200, 2500, 5000, 10000, 20000), `MAX_LEVEL`, `levelFor`, `nextLevelAt`, `levelProgress`, `xpForHabit(qualifyingDays, difficulty) = round(qualifyingDays * 10 * difficulty)`.
+- Schema/action: `habits.difficulty` real, accepted on `createHabit`/`updateHabit` via `sanitizeDifficulty` (range 0.1..5). `HabitFormDialog` got a Difficulty range slider (0.5–3.0, default 1.0) with snap labels (Easy / Default / Hard).
+- `src/db/queries/habits.ts`: new `getValueLogsOnDate(date)` returning `Record<habitId, HabitValueLog[]>`. New `getXpByHabit()` runs 3 unioned reads (habit_logs, habit_value_logs, pomodoro_sessions), groups in JS, and emits per-habit XP via `xpForHabit`. New `HabitValueLogRow` type re-exported.
+- `src/app/api/page/habits/[date]/route.ts` payload extended with `valueLogsByHabit`, `xpByHabit`, `readingBooks`, `activeBookId`.
+- `src/app/habits/_components/today-toggles.tsx` rewrote the rendering pipeline:
+  - **`DonutGlyph`** replaces the plain `Glyph` — SVG donut traces the day's progress ratio around the emoji using the habit color (re-uses extended `ProgressDonut` with new `color`/`trackColor` props). At ratio ≥ 1 the inner circle fills + emoji turns into a check.
+  - **`RowFill`** — absolute-positioned horizontal gradient behind row content with `width = ratio * 100%` and a two-stop alpha gradient, so partial days show a visible partial-fill bar inside the row. At ratio ≥ 1, `rowStyle()` paints the full row with the existing solid 0.18 tint instead.
+  - **`LevelChip`** — always rendered (Lv 1 default at 0 XP), unified to the **far right** of every row (binary/number/pomo), built as a base-ui Popover trigger. Popover content: big header, horizontal XP progress bar, 3-stat grid (Total XP · To next · ×difficulty), full level-threshold table with current level highlighted.
+  - **`DeltasHistoryButton`** — new Popover next to the Log button on NumberRow. Lists today's individual `habit_value_logs` rows with time + note; each row has an × delete that fires `mutate("delete_habit_value_log")` with optimistic value-overlay rollback.
+  - Value overlay reconciliation is now direction-aware (`delta >= 0 ? currentServer >= expected : currentServer <= expected`) so the same pattern works for both Log (+) and history-delete (−) optimistic flows.
+  - BinaryRow changed from `<button>` to `<div role="button" tabIndex={0}>` with click + keyboard handlers — required because the nested Popover.Trigger button inside would otherwise produce invalid nested-button HTML. PomoRow keeps `<Link>` (anchor-around-button is OK); chip's onClick `stopPropagation` prevents accidental navigation.
+- `src/app/actions/habits.ts`: `deleteHabitValueLog(id)` added (was deferred to 6.1). `logHabitValue` accepts optional `bookId`. Dispatch already had `delete_habit_value_log` slot.
+- `src/app/habits/_components/habit-list.tsx` (Manage) — each row now shows a Lv chip pulled from `xpByHabit`. Same `hexToRgba` tint scheme.
+- `src/app/habits/_components/habit-grid.tsx` — cell renderer uses `computeCellFill` so number/pomo partial days now read at-a-glance.
+- New `src/app/insights/_components/habits-xp-card.tsx` ("Levels" card) added to `/insights` — every active habit sorted by XP desc, per-row Lv chip + horizontal progress bar + "in-level / level-span XP" + total XP. Header shows total XP across all habits.
+
+### Slice C — Journal tasks: drag-reorder + trace tap-to-navigate
+- New `reorderTasks({ date, kind, orderedIds })` action — validated, single transaction, revalidates `/journal/{date}`. Dispatch + `mutate.ts cacheKeysFor` updated.
+- `tasks-block.tsx` `KindCard` wrapped active rows in `DndContext` + `SortableContext` + `verticalListSortingStrategy`. Grip handle appears on hover. Local `reorderOverride` state keeps the drag result visible until the server refetch confirms. Trace rows are not draggable (rendered separately, after active rows).
+- `moveJournalTask` now stamps `movedToDate = newDate` on the trace stub it inserts. `TraceRow` wraps in `<Link href="/journal/{movedToDate}">` when set; legacy stubs fall back to plain text.
+
+### Slice D — Insights: journal calendar / heatmap section
+- New `src/app/insights/_components/journal-month-grid.tsx` — clone of `focus-month-grid` adapted for journal status. Multi-month grid; each in-range cell is a `<Link>` to `/journal/{date}`.
+- `/insights/page.tsx` adds a "Journal at a glance" section using `getJournalMonthStatus(monthsStart, monthsEnd)`. Range comes from existing `?range=` toggle; whole-months widening so the grid edges render cleanly.
+
+### Slice E — Books (`/books`)
+- `src/db/queries/books.ts`: `getAllBooks`, `getActiveBooks`, `findBookById`, `nextBookPosition`, `getProgressByBook`, `getProgressForBooks`, `getActiveBookId` (reads `settings.active_book_id` KV, falls back to null when missing or pointing at a non-reading book).
+- `src/app/actions/books.ts`: `createBook`, `updateBook`, `deleteBook`, `reorderBooks`, `setActiveBook`. Full sanitization (title/author/notes/rating/status/color/pages/dates).
+- `src/app/books/page.tsx` + `_components/books-page-client.tsx` + `_components/book-form-dialog.tsx` — new route. List grouped by status (Reading · Wishlist · Finished · DNF), per-row progress bar (when `totalPages` set), rating stars (when finished), active chip, kebab menu (Edit / Set as active / Mark finished/DNF / Move to reading / Delete).
+- `src/app/api/page/books/route.ts` — SWR endpoint returning `{ books, progress, activeBookId }`. `BooksPageClient` uses `useCachedPage("books", ...)`.
+- `src/app/more/page.tsx` — added Books card linking to `/books`.
+- `LogValueButton` in `today-toggles.tsx` got a book picker chip row when the habit is the Read habit (heuristic: `unit === "pages"` OR `name === "read"`). Active book pre-selected; "No book" option still available. Picked `bookId` flows through `mutate("log_habit_value", { ..., bookId })` → server persists → book progress on `/books` derives from `SUM(habit_value_logs.value WHERE book_id = ?)`.
+- Dispatch + `cacheKeysFor` got the 5 new book mutation kinds plus a book invalidation path on `log_habit_value` / `delete_habit_value_log` when `bookId` is set.
+
+### PWA shell
+- `public/sw.js` `VERSION` bumped `habit-log-v12 → habit-log-v13`. SHELL got `/books`.
+
+### Verification
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 45 warnings (40 pre-existing + 5 new `react-hooks/set-state-in-effect` from reconciliation effects; same exemption pattern documented since Day 8).
+- `npm run build` clean — **24 routes** (was 22; new `/books` ƒ + `/api/page/books` ƒ).
+- Local probes: `/habits/today`, `/insights?range=30`, `/api/page/habits/today`, `/books`, `/api/page/books`, `/journal/today`, `/goals/week/2026-W22`, `/more` all 200.
+- User signed off on real-device behaviour after the XP-fix pass (always-visible chip, right-side position, gamification popover, partial-fill grid cells with bottom-up battery cutoff, row donut glyph + horizontal progress fill).
+
+### Deploy
+1. `git push origin main`.
+2. `npm run db:migrate` against prod Turso (additive — safe).
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. PWA `habit-log-v13` activates on next SW lifecycle (installed phones pick up `/books` shell entry).
+
+---
+
 ## 📌 Resume here for the next session
 
 **State at session end (2026-05-26):**
-- Working tree clean after the Phase 11 commit.
+- Working tree clean after the Phase 11.1 commit.
 - Live: https://daily-journal-phi-vert.vercel.app (Vercel + Turso `aws-ap-south-1`).
-- PWA shell `habit-log-v10`.
-- Local DB seeded with the canonical 16-habit stack (14 from Phase 6 + Protein + Hand grip from Phase 7C).
-- No pending schema migrations; no pending IDB-queue mutations expected on a fresh session.
+- PWA shell `habit-log-v13`.
+- Local + prod DB migrated through `0010_books_xp_trace.sql`. New `books` table starts empty on both.
+- Local DB still has the canonical 16-habit stack (Phase 6 + 7C); difficulty defaults to 1.0 for all.
 
-**Instant-UI feature is closed.** Every action (write or read-nav) feels instant on revisit. Don't reopen unless real-device feedback surfaces a regression.
+**Pick-list for next session (post-11.1):**
 
-**Pick-list for next session, ordered by likely value:**
-
-1. **Drag-reorder for journal tasks.** Position column exists in `journal_tasks`. Same DndKit pattern as questions/habits/categories. ~30-60 min.
-2. **Edit `pinned` via the goal edit dialog.** Currently the floating pin button is the only way to toggle. The Phase 7 edit dialog already accepts a `pinned` prop on the form but doesn't surface it as an edit field — quick win.
-3. **Partial-fill cells in `HabitGrid`** for number/pomo habits. Opacity proportional to `value/target` on a day. Currently the grid is binary-done-only for those kinds. ~1 hour.
-4. **"Move all incomplete" bulk action** on each KindCard in tasks-block.
-5. **Reflection summary view** across periods — browse rated reflections in one place.
-6. **Export / import** as JSON. `/api/export` + an "Import" action that replays into Drizzle. Self-contained backup for the user.
-7. **AI weekly / monthly reflections** via Claude API. New `/insights` section. ~few hours, costs cents.
-8. **Calendar/heatmap view of the journal** itself (months at a glance, mood-tinted).
-9. **FTS search** across gratitude / tomorrow / journal answers using libSQL fts5 virtual table.
+1. **"Move all incomplete" bulk action** per KindCard in tasks-block (5.1 carry-over).
+2. **Reflection summary view** across periods — browse rated reflections in one place.
+3. **Export / import** as JSON. `/api/export` + Import that replays into Drizzle.
+4. **AI weekly / monthly reflections** via Claude API. New `/insights` section.
+5. **FTS search** across gratitude / tomorrow / journal answers (libSQL fts5).
+6. **Per-day target overrides** (e.g. weekend Walk = 8k, weekday = 5k).
+7. **Drop legacy `cadence` + `targetPerWeek` columns** from habits — schema cleanup, deferred since Phase 6.
+8. **Books polish** — pages-per-week chart, OpenLibrary cover fetch, reading streaks.
+9. **Level-up toasts** — surface a "Lv N unlocked!" notification when a log crosses a threshold.
 10. **3D avatar** for the gym body heatmap.
 
 **Standing rules (auto-memory + global CLAUDE.md):**

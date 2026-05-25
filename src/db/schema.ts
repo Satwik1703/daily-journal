@@ -56,6 +56,10 @@ export const journalTasks = sqliteTable(
     text: text("text").notNull(),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
     position: integer("position").notNull().default(0),
+    // Phase 11.1: when this task is a "trace stub" left behind by moveJournalTask,
+    // points at the date the task was moved TO. Null otherwise. Lets TraceRow be
+    // a tappable Link without parsing the human-readable text.
+    movedToDate: text("moved_to_date"),
   },
   (t) => [index("journal_tasks_date_kind").on(t.date, t.kind)],
 );
@@ -86,6 +90,8 @@ export const habits = sqliteTable("habits", {
   // Default 127 = 0b1111111 = all days. Habit hidden on weekdays where the
   // corresponding bit is 0.
   weekdayMask: integer("weekday_mask").notNull().default(127),
+  // Phase 11.1: difficulty multiplier feeding XP. 1.0 = baseline.
+  difficulty: real("difficulty").notNull().default(1.0),
   position: integer("position").notNull().default(0),
   archivedAt: integer("archived_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
@@ -105,11 +111,19 @@ export const habitValueLogs = sqliteTable(
     date: text("date").notNull(),
     value: real("value").notNull(),
     note: text("note"),
+    // Phase 11.1: optional link to a book row. Set when the Read habit logs
+    // pages against a specific book; null for any other number-kind habit.
+    bookId: text("book_id").references((): AnySQLiteColumn => books.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
   },
-  (t) => [index("habit_value_logs_habit_date").on(t.habitId, t.date)],
+  (t) => [
+    index("habit_value_logs_habit_date").on(t.habitId, t.date),
+    index("habit_value_logs_book").on(t.bookId),
+  ],
 );
 
 // Absence = not done. PK on (habitId, date) makes idempotent inserts trivial.
@@ -375,3 +389,33 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value", { mode: "json" }),
 });
+
+// ---------- Books (Phase 11.1) ----------
+
+// Books being read / wishlisted / finished. Per-day pages are not stored here;
+// they're rows in `habit_value_logs` with this book's id in `book_id`. Progress
+// is derived as SUM(habit_value_logs.value WHERE book_id = ?).
+export const books = sqliteTable(
+  "books",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    author: text("author"),
+    totalPages: integer("total_pages"),
+    startedAt: text("started_at"),
+    finishedAt: text("finished_at"),
+    rating: integer("rating"),
+    notes: text("notes"),
+    status: text("status", {
+      enum: ["reading", "finished", "dnf", "wishlist"],
+    })
+      .notNull()
+      .default("reading"),
+    color: text("color").notNull().default("#a89b6a"),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("books_status").on(t.status)],
+);

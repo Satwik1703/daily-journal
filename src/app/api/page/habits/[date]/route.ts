@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { getHabitsSnapshot } from "@/db/queries/habits";
+import {
+  getHabitsSnapshot,
+  getValueLogsOnDate,
+  getXpByHabit,
+} from "@/db/queries/habits";
 import { getActiveCategories } from "@/db/queries/pomodoro-categories";
+import { getActiveBooks, getActiveBookId } from "@/db/queries/books";
 import { formatLocalYMD, isValidDateString } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -14,9 +19,20 @@ export async function GET(
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const [snapshot, pomoCategories] = await Promise.all([
+  const [
+    snapshot,
+    pomoCategories,
+    valueLogsByHabit,
+    xpByHabit,
+    readingBooks,
+    activeBookId,
+  ] = await Promise.all([
     getHabitsSnapshot({ anchor: date, windowDays: 15 }),
     getActiveCategories(),
+    getValueLogsOnDate(date),
+    getXpByHabit(),
+    getActiveBooks(),
+    getActiveBookId(),
   ]);
 
   // Lifespan filter applies to both lists; weekday-mask filter only to the
@@ -63,5 +79,9 @@ export async function GET(
     windowValuesRecord,
     windowPomoRecord,
     windowLogsRecord,
+    valueLogsByHabit,
+    xpByHabit,
+    readingBooks,
+    activeBookId,
   });
 }

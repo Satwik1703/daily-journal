@@ -8,8 +8,11 @@ import {
   habitValueLogs,
   pomodoroSessions,
 } from "@/db/schema";
-import { and, asc, between, eq, inArray, isNotNull, isNull, sum, count } from "drizzle-orm";
+import { and, asc, between, eq, inArray, isNotNull, isNull, sum, count, desc } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import {
+  addDays,
+  periodKeyFor,
   periodRangeFor,
   shiftPeriodKey,
   todayLocal,
@@ -239,6 +242,15 @@ export async function getGoalsForPeriod(
   periodKey: string,
 ): Promise<GoalWithDerived[]> {
   const range = periodRangeFor(periodKey, period);
+
+  // Lazy auto-extend: on EVERY week read, push every active reverse-cascade
+  // tree forward by one week if its latest weekly clone is behind. Idempotent
+  // (de-duped by periodKey) and cheap (one query for the latest weekly per
+  // tree). Runs before the main select so newly-inserted rows show up below.
+  if (period === "week") {
+    await autoExtendReverseCascadeTrees(periodKey);
+  }
+
   const rows = await db
     .select()
     .from(goals)
@@ -453,3 +465,136 @@ export function rangeForPeriod(
 export function getToday(): DateString {
   return todayLocal();
 }
+
+// ---------- Lazy reverse-cascade auto-extend (Phase 11.1) ----------
+//
+// On every week-period read, scan active yearly goals. For each one that
+// looks like a reverse-cascade tree (i.e. has any weekly descendants), if the
+// latest weekly clone's periodKey < nextWeekKey AND the year still has room,
+// insert exactly one weekly clone for the next missing week — plus its
+// monthly parent if that month isn't present yet. Effectively self-heals
+// every Sunday without a cron job. Heavy-lifting batch fill is still done
+// manually via scripts/extend-weekly-goals.mjs.
+async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<void> {
+  const nextWeekKey = shiftPeriodKey(currentWeekKey, "week", 1);
+  const yearOfNext = nextWeekKey.slice(0, 4);
+
+  // Yearly roots active in the year of nextWeekKey.
+  const yearlies = await db
+    .select()
+    .from(goals)
+    .where(
+      and(
+        eq(goals.period, "year"),
+        eq(goals.periodKey, yearOfNext),
+        isNull(goals.archivedAt),
+      ),
+    );
+  if (yearlies.length === 0) return;
+
+  for (const yearly of yearlies) {
+    if (yearly.type === "milestone") continue;
+    // Latest weekly descendant in this tree. We identify the tree by the
+    // yearly's identity: habit-linked goals share habitId; everything else
+    // matches by title.
+    const matchClauses = yearly.habitId
+      ? eq(goals.habitId, yearly.habitId)
+      : eq(goals.title, yearly.title);
+    const latestWeekly = await db
+      .select()
+      .from(goals)
+      .where(
+        and(
+          matchClauses,
+          eq(goals.period, "week"),
+          isNull(goals.archivedAt),
+        ),
+      )
+      .orderBy(desc(goals.periodKey))
+      .limit(1);
+    if (latestWeekly.length === 0) continue; // not a reverse-cascade tree
+
+    const lastKey = latestWeekly[0].periodKey;
+    if (lastKey >= nextWeekKey) continue; // already extended past next week
+    const targetWeekKey = nextWeekKey;
+    if (!targetWeekKey.startsWith(yearOfNext)) continue; // past year boundary
+
+    // Figure out the month that contains targetWeekKey's Thursday.
+    const wkRange = periodRangeFor(targetWeekKey, "week");
+    const thursday = addDays(wkRange.start, 4);
+    const monthKey = thursday.slice(0, 7);
+
+    // Find or insert the monthly parent.
+    let monthly = await db
+      .select()
+      .from(goals)
+      .where(
+        and(
+          matchClauses,
+          eq(goals.period, "month"),
+          eq(goals.periodKey, monthKey),
+          isNull(goals.archivedAt),
+        ),
+      )
+      .limit(1);
+
+    let monthlyParentId: string;
+    if (monthly.length > 0) {
+      monthlyParentId = monthly[0].id;
+    } else {
+      // Pull a weekly clone's targetValue to learn weeklyTarget.
+      const weeklyTarget = latestWeekly[0].targetValue ?? yearly.targetValue ?? 0;
+      monthlyParentId = nanoid(12);
+      const position = await nextPositionFor("month", monthKey);
+      await db.insert(goals).values({
+        id: monthlyParentId,
+        period: "month",
+        periodKey: monthKey,
+        parentId: yearly.id,
+        title: yearly.title,
+        emoji: yearly.emoji,
+        color: yearly.color,
+        type: yearly.type,
+        targetValue: weeklyTarget, // single-week month at creation; updated when more weeks join
+        unit: yearly.unit,
+        habitId: yearly.habitId,
+        pomoCategoryId: yearly.pomoCategoryId,
+        pomoMetric: yearly.pomoMetric,
+        status: "active",
+        position,
+      });
+      // Re-read so we have its row (not strictly needed but keeps the
+      // shape consistent if we ever want to use it).
+      monthly = await db
+        .select()
+        .from(goals)
+        .where(eq(goals.id, monthlyParentId))
+        .limit(1);
+    }
+
+    // Insert the weekly clone.
+    const weeklyTarget = latestWeekly[0].targetValue ?? yearly.targetValue ?? 0;
+    const position = await nextPositionFor("week", targetWeekKey);
+    await db.insert(goals).values({
+      id: nanoid(12),
+      period: "week",
+      periodKey: targetWeekKey,
+      parentId: monthlyParentId,
+      title: yearly.title,
+      emoji: yearly.emoji,
+      color: yearly.color,
+      type: yearly.type,
+      targetValue: weeklyTarget,
+      unit: yearly.unit,
+      habitId: yearly.habitId,
+      pomoCategoryId: yearly.pomoCategoryId,
+      pomoMetric: yearly.pomoMetric,
+      status: "active",
+      position,
+    });
+  }
+}
+
+// Suppress unused-import warning if the file is consumed before periodKeyFor
+// is referenced elsewhere — it's used by the action layer.
+void periodKeyFor;

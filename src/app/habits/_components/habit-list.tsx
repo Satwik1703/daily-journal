@@ -37,7 +37,15 @@ import {
 import { HabitFormDialog, type CategoryOption } from "./habit-form-dialog";
 import { mutate } from "@/lib/sync/mutate";
 import type { Habit } from "@/db/queries/habits";
-import { summarizeMask, TRACKING_KIND_LABELS, type HabitTrackingKind } from "@/lib/habit-meta";
+import {
+  hexToRgba,
+  levelFor,
+  levelProgress,
+  nextLevelAt,
+  summarizeMask,
+  TRACKING_KIND_LABELS,
+  type HabitTrackingKind,
+} from "@/lib/habit-meta";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -45,10 +53,12 @@ export function HabitList({
   active,
   archived,
   categories,
+  xpByHabit,
 }: {
   active: Habit[];
   archived: Habit[];
   categories: CategoryOption[];
+  xpByHabit?: Record<string, number>;
 }) {
   const [editing, setEditing] = useState<Habit | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -108,6 +118,7 @@ export function HabitList({
                   key={h.id}
                   habit={h}
                   subtitle={trackingSummary(h, categories)}
+                  xp={xpByHabit?.[h.id] ?? 0}
                   onEdit={() => setEditing(h)}
                   onArchive={() => {
                     void mutate("archive_habit", { id: h.id });
@@ -165,11 +176,13 @@ function trackingSummary(habit: Habit, categories: CategoryOption[]): string {
 function SortableRow({
   habit,
   subtitle,
+  xp,
   onEdit,
   onArchive,
 }: {
   habit: Habit;
   subtitle?: string;
+  xp: number;
   onEdit: () => void;
   onArchive: () => void;
 }) {
@@ -186,6 +199,7 @@ function SortableRow({
       <Row
         habit={habit}
         subtitle={subtitle}
+        xp={xp}
         onEdit={onEdit}
         onArchive={onArchive}
         dragHandleProps={{ ...attributes, ...listeners }}
@@ -200,6 +214,7 @@ type DragHandleProps = React.HTMLAttributes<HTMLButtonElement>;
 function Row({
   habit,
   subtitle,
+  xp = 0,
   onEdit,
   onArchive,
   muted = false,
@@ -210,6 +225,7 @@ function Row({
 }: {
   habit: Habit;
   subtitle?: string;
+  xp?: number;
   onEdit: () => void;
   onArchive: () => void;
   muted?: boolean;
@@ -218,6 +234,9 @@ function Row({
   dragHandleProps?: DragHandleProps;
   isDragging?: boolean;
 }) {
+  const lvl = xp > 0 ? levelFor(xp) : null;
+  const next = xp > 0 ? nextLevelAt(xp) : null;
+  const pct = xp > 0 ? Math.round(levelProgress(xp) * 100) : 0;
   return (
     <div
       className={cn(
@@ -244,7 +263,21 @@ function Row({
         {habit.emoji ?? "•"}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{habit.name}</div>
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm">{habit.name}</span>
+          {lvl != null ? (
+            <span
+              title={next == null ? `${xp} XP — max level` : `${xp} XP — ${pct}% to Lv ${lvl + 1}`}
+              className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0 text-[10px] font-medium tabular-nums"
+              style={{
+                background: hexToRgba(habit.color, 0.18),
+                borderColor: hexToRgba(habit.color, 0.5),
+              }}
+            >
+              Lv {lvl}
+            </span>
+          ) : null}
+        </div>
         {subtitle ? (
           <div className="truncate text-[10px] uppercase tracking-wider text-muted-foreground">
             {subtitle}

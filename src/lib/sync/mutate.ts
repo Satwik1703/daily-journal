@@ -32,11 +32,11 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("pomodoro:*");
     keys.push("insights");
   }
-  if (kind === "save_journal_entry" || kind === "add_task" || kind === "toggle_task" || kind === "update_task_text" || kind === "delete_task" || kind === "move_task") {
+  if (kind === "save_journal_entry" || kind === "add_task" || kind === "toggle_task" || kind === "update_task_text" || kind === "delete_task" || kind === "move_task" || kind === "reorder_tasks") {
     if (a.date) keys.push(`journal:${a.date}`);
     keys.push("journal:*");
   }
-  if (kind.startsWith("create_goal") || kind.startsWith("update_goal_cascade") || kind.startsWith("delete_goal_cascade") || kind === "archive_goal" || kind === "unarchive_goal" || kind === "set_goal_pinned" || kind === "log_progress" || kind === "delete_progress" || kind === "add_checklist_item" || kind === "update_checklist_item" || kind === "toggle_checklist_item" || kind === "delete_checklist_item" || kind === "save_reflection") {
+  if (kind.startsWith("create_goal") || kind.startsWith("update_goal_cascade") || kind.startsWith("delete_goal_cascade") || kind === "archive_goal" || kind === "unarchive_goal" || kind === "set_goal_pinned" || kind === "log_progress" || kind === "delete_progress" || kind === "add_checklist_item" || kind === "update_checklist_item" || kind === "toggle_checklist_item" || kind === "delete_checklist_item" || kind === "save_reflection" || kind === "extend_reverse_cascade") {
     if (a.period && a.periodKey) keys.push(`goals:${a.period}:${a.periodKey}`);
     keys.push("goals:*");
   }
@@ -46,6 +46,20 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("pomodoro:*");
   }
   if (kind === "set_pomo_sound") keys.push("settings");
+  if (
+    kind === "create_book" ||
+    kind === "update_book" ||
+    kind === "delete_book" ||
+    kind === "reorder_books" ||
+    kind === "set_active_book"
+  ) {
+    keys.push("books");
+    keys.push("habits:*");
+  }
+  if (kind === "log_habit_value" || kind === "delete_habit_value_log") {
+    // Read habit logs may carry a bookId; invalidate the books page when present.
+    if ((a as { bookId?: string | null }).bookId !== undefined) keys.push("books");
+  }
   if (
     kind === "start_workout" ||
     kind === "update_workout" ||

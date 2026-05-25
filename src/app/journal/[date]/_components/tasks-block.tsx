@@ -1,10 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import TextareaAutosize from "react-textarea-autosize";
-import { Plus, Trash2, Check, CalendarArrowUp } from "lucide-react";
+import { Plus, Trash2, Check, CalendarArrowUp, GripVertical } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -29,10 +47,57 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
   const [adding, setAdding] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [optimisticAdded, setOptimisticAdded] = useState<JournalTask[]>([]);
+  const [reorderOverride, setReorderOverride] = useState<JournalTask[] | null>(null);
   const visibleServer = tasks.filter((t) => !hiddenIds.has(t.id));
   // Filter duplicates: server may already include the optimistic row.
   const visibleAdded = optimisticAdded.filter((t) => !tasks.some((s) => s.id === t.id));
-  const visible = [...visibleServer, ...visibleAdded];
+  // If a local drag-reorder just happened, render that order until the server
+  // refetch confirms (which clears the override).
+  const visible = reorderOverride
+    ? reorderOverride.filter(
+        (t) => !hiddenIds.has(t.id) && (tasks.some((s) => s.id === t.id) || optimisticAdded.some((o) => o.id === t.id)),
+      )
+    : [...visibleServer, ...visibleAdded];
+
+  // Drop the override once the server's task list reflects it.
+  const tasksKey = tasks.map((t) => t.id).join(",");
+  useEffect(() => {
+    if (!reorderOverride) return;
+    const serverOrder = tasks.map((t) => t.id).join(",");
+    const overrideOrder = reorderOverride
+      .filter((t) => tasks.some((s) => s.id === t.id))
+      .map((t) => t.id)
+      .join(",");
+    if (serverOrder === overrideOrder) setReorderOverride(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasksKey]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  // Only active (non-trace) rows participate in drag-reorder. Trace stubs
+  // render in place after the active list.
+  const activeTasks = visible.filter((t) => !isTraceTask(t.text));
+  const traceTasks = visible.filter((t) => isTraceTask(t.text));
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active: a, over } = e;
+    if (!over || a.id === over.id) return;
+    const oldIndex = activeTasks.findIndex((t) => t.id === a.id);
+    const newIndex = activeTasks.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const nextActive = arrayMove(activeTasks, oldIndex, newIndex);
+    // Reassemble full visible list keeping trace tasks at the end.
+    const nextFull = [...nextActive, ...traceTasks];
+    setReorderOverride(nextFull);
+    void mutate("reorder_tasks", {
+      date,
+      kind,
+      orderedIds: nextActive.map((t) => t.id),
+    });
+  }
 
   function handleAdd(text: string) {
     if (!text.trim()) {
@@ -47,6 +112,7 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
       text,
       done: false,
       position: tasks.length + optimisticAdded.length,
+      movedToDate: null,
     };
     setOptimisticAdded((arr) => [...arr, newTask]);
     void mutate("add_task", { id, date, kind, text });
@@ -101,8 +167,24 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
         {visible.length === 0 && !adding ? (
           <p className="text-xs text-muted-foreground/70 italic">Tap + to add</p>
         ) : null}
-        {visible.map((t) => (
-          <TaskRow key={t.id} task={t} onHide={() => handleHide(t.id)} />
+        {activeTasks.length > 0 ? (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={activeTasks.map((t) => t.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {activeTasks.map((t) => (
+                <SortableTaskRow key={t.id} task={t} onHide={() => handleHide(t.id)} />
+              ))}
+            </SortableContext>
+          </DndContext>
+        ) : null}
+        {traceTasks.map((t) => (
+          <TraceRow key={t.id} text={t.text} movedToDate={t.movedToDate ?? null} />
         ))}
         {adding ? (
           <NewTaskInput onCancel={() => setAdding(false)} onSubmit={handleAdd} />
@@ -112,27 +194,67 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
   );
 }
 
-function TaskRow({ task, onHide }: { task: JournalTask; onHide: () => () => void }) {
-  if (isTraceTask(task.text)) {
-    return <TraceRow text={task.text} />;
-  }
-  return <ActiveTaskRow task={task} onHide={onHide} />;
-}
-
-function TraceRow({ text }: { text: string }) {
-  // text format: "→ Moved to YYYY-MM-DD: excerpt"
-  // We re-emit it as muted italics + strikethrough.
+function SortableTaskRow({ task, onHide }: { task: JournalTask; onHide: () => () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : undefined,
+  };
   return (
-    <div className="flex items-start gap-2 rounded-md px-1 py-1 opacity-60">
-      <span className="mt-1.5 size-5 shrink-0" aria-hidden />
-      <span className="flex-1 px-2 py-1 text-sm italic leading-relaxed text-muted-foreground line-through">
-        {text}
-      </span>
+    <div ref={setNodeRef} style={style}>
+      <ActiveTaskRow
+        task={task}
+        onHide={onHide}
+        dragHandleProps={{ ...attributes, ...listeners }}
+        isDragging={isDragging}
+      />
     </div>
   );
 }
 
-function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => () => void }) {
+function TraceRow({ text, movedToDate }: { text: string; movedToDate: string | null }) {
+  // Phase 11.1: when movedToDate is set, wrap in a Link to navigate to the
+  // target. Falls back to plain span for legacy trace rows without the
+  // structured pointer column.
+  const inner = (
+    <span className="flex-1 px-2 py-1 text-sm italic leading-relaxed text-muted-foreground line-through">
+      {text}
+    </span>
+  );
+  return (
+    <div className="flex items-start gap-2 rounded-md px-1 py-1 opacity-60">
+      <span className="mt-1.5 size-5 shrink-0" aria-hidden />
+      {movedToDate ? (
+        <Link
+          href={`/journal/${movedToDate}`}
+          className="flex-1 hover:opacity-80"
+          title={`Jump to ${movedToDate}`}
+        >
+          {inner}
+        </Link>
+      ) : (
+        inner
+      )}
+    </div>
+  );
+}
+
+type DragHandleProps = React.HTMLAttributes<HTMLButtonElement>;
+
+function ActiveTaskRow({
+  task,
+  onHide,
+  dragHandleProps,
+  isDragging = false,
+}: {
+  task: JournalTask;
+  onHide: () => () => void;
+  dragHandleProps?: DragHandleProps;
+  isDragging?: boolean;
+}) {
   const [text, setText] = useState(task.text);
   const [done, setDone] = useState(task.done);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -150,7 +272,22 @@ function ActiveTaskRow({ task, onHide }: { task: JournalTask; onHide: () => () =
   }
 
   return (
-    <div className="group/task flex items-start gap-2 rounded-md px-1 py-1">
+    <div
+      className={cn(
+        "group/task flex items-start gap-1 rounded-md px-1 py-1",
+        isDragging && "bg-muted/40 shadow-sm",
+      )}
+    >
+      {dragHandleProps ? (
+        <button
+          type="button"
+          aria-label="Drag to reorder"
+          className="-ml-1 mt-1.5 cursor-grab touch-none rounded p-0.5 text-muted-foreground/40 opacity-0 hover:text-foreground/70 active:cursor-grabbing group-hover/task:opacity-100"
+          {...dragHandleProps}
+        >
+          <GripVertical className="size-3.5" />
+        </button>
+      ) : null}
       <button
         type="button"
         aria-pressed={done}

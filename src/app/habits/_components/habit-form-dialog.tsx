@@ -33,6 +33,14 @@ import { toast } from "sonner";
 
 const SUGGESTED_EMOJI = ["💧", "📚", "🏃", "🧘", "💊", "🥗", "🛌", "🙏", "🎯", "✏️"];
 
+function difficultyLabel(d: number): string {
+  if (d <= 0.7) return "(easy)";
+  if (d <= 1.2) return "(default)";
+  if (d <= 1.7) return "(medium)";
+  if (d <= 2.5) return "(hard)";
+  return "(insane)";
+}
+
 export type CategoryOption = {
   id: string;
   name: string;
@@ -59,6 +67,7 @@ export function HabitFormDialog({
   const [unit, setUnit] = useState<string>("");
   const [pomoCategoryId, setPomoCategoryId] = useState<string>("");
   const [weekdays, setWeekdays] = useState<boolean[]>(() => arrayFromWeekdayMask(WEEKDAY_MASK_ALL));
+  const [difficulty, setDifficulty] = useState<number>(1.0);
 
   // Reset form fields when the dialog opens.
   useEffect(() => {
@@ -71,6 +80,7 @@ export function HabitFormDialog({
       setUnit(habit?.unit ?? "");
       setPomoCategoryId(habit?.pomoCategoryId ?? "");
       setWeekdays(arrayFromWeekdayMask(habit?.weekdayMask ?? WEEKDAY_MASK_ALL));
+      setDifficulty(habit?.difficulty ?? 1.0);
     }
   }, [open, habit]);
 
@@ -104,6 +114,7 @@ export function HabitFormDialog({
       unit: trackingKind === "number" ? unit || null : null,
       pomoCategoryId: trackingKind === "pomodoro" ? pomoCategoryId : null,
       weekdayMask,
+      difficulty,
     };
     if (habit) {
       void mutate("update_habit", { id: habit.id, ...payload });
@@ -312,6 +323,30 @@ export function HabitFormDialog({
               >
                 Weekends
               </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="habit-difficulty">Difficulty</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                ×{difficulty.toFixed(1)} {difficultyLabel(difficulty)}
+              </span>
+            </div>
+            <input
+              id="habit-difficulty"
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.1}
+              value={difficulty}
+              onChange={(e) => setDifficulty(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground/70">
+              <span>Easy</span>
+              <span>Default</span>
+              <span>Hard</span>
             </div>
           </div>
 

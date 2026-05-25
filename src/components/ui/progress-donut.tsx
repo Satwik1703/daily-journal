@@ -8,6 +8,9 @@ export function ProgressDonut({
   strokeWidth = 8,
   label,
   className,
+  color,
+  trackColor,
+  centerClassName,
 }: {
   percent: number;
   size?: number;
@@ -15,6 +18,12 @@ export function ProgressDonut({
   /** Optional center label override; defaults to `${rounded}%`. */
   label?: React.ReactNode;
   className?: string;
+  /** Arc stroke color. Defaults to `var(--primary)`. */
+  color?: string;
+  /** Track stroke color. Defaults to `var(--muted)`. */
+  trackColor?: string;
+  /** Extra classes applied to the absolute center label wrapper. */
+  centerClassName?: string;
 }) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
   const rounded = Math.round(clamped);
@@ -31,18 +40,22 @@ export function ProgressDonut({
           cy="36"
           r="30"
           fill="none"
-          stroke="var(--muted)"
+          stroke={trackColor ?? "var(--muted)"}
           strokeWidth={strokeWidth}
         />
         <path
           d={ringPath}
           fill="none"
-          stroke="var(--primary)"
+          stroke={color ?? "var(--primary)"}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
       </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
+      <div
+        className={
+          "absolute inset-0 flex items-center justify-center " + (centerClassName ?? "")
+        }
+      >
         <span className="text-base font-semibold tabular-nums">
           {label ?? `${rounded}%`}
         </span>

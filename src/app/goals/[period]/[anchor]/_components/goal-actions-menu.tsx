@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MoreHorizontal, Pencil, Trash2, Archive, RotateCcw } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Archive, RotateCcw, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,6 +80,20 @@ export function GoalActionsMenu({
             <Pencil />
             Edit goal
           </DropdownMenuItem>
+          {goal.type !== "milestone" ? (
+            <DropdownMenuItem
+              onClick={() => {
+                void mutate("extend_reverse_cascade", {
+                  rootGoalId: goal.id,
+                  through: "endOfYear",
+                });
+                toast.success("Extending cascade through end of year");
+              }}
+            >
+              <CalendarPlus />
+              Extend through year
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             onClick={() => {
               const isArchived = goal.archivedAt != null;

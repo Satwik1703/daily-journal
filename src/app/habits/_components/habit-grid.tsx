@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatShortDate, parseDate, type DateString } from "@/lib/dates";
 import {
+  computeCellFill,
   isHabitActiveOnWeekday,
   isHabitDoneOnDate,
   WEEKDAY_LABELS,
@@ -101,17 +102,26 @@ export function HabitGrid({
                         </span>
                       );
                     }
+                    const fillStyle = computeCellFill(
+                      kind,
+                      h.color,
+                      h.dailyTarget,
+                      daySumOrCount,
+                      hadLog,
+                    );
+                    const ratioLabel =
+                      (kind === "number" || kind === "pomodoro") && h.dailyTarget
+                        ? ` ${Math.round((daySumOrCount / h.dailyTarget) * 100)}%`
+                        : "";
                     return (
                       <span
                         key={d}
-                        title={`${h.name} — ${formatShortDate(d)}${done ? " ✓" : ""}`}
+                        title={`${h.name} — ${formatShortDate(d)}${done ? " ✓" : ratioLabel}`}
                         className={cn(
                           "aspect-square rounded-[2px] transition-colors",
                           isRing && "ring-1 ring-foreground/40",
                         )}
-                        style={{
-                          backgroundColor: done ? h.color : "rgba(125,125,125,0.10)",
-                        }}
+                        style={fillStyle}
                       />
                     );
                   })}

@@ -18,9 +18,14 @@ import { FocusTrendChart } from "./_components/focus-trend-chart";
 import { TopCategories } from "./_components/top-categories";
 import { HourHistogram } from "./_components/hour-histogram";
 import { FocusMonthGrid, buildPerDateMap } from "./_components/focus-month-grid";
+import { JournalMonthGrid } from "./_components/journal-month-grid";
+import { HabitsXpCard } from "./_components/habits-xp-card";
 import { HabitGrid } from "@/app/habits/_components/habit-grid";
+import { getXpByHabit } from "@/db/queries/habits";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Flame } from "lucide-react";
+import { addDays, todayLocal, firstOfMonth } from "@/lib/dates";
+import { getJournalMonthStatus } from "@/db/queries/journal-month";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +58,18 @@ export default async function InsightsPage({
     getAllSessionDates(),
     getActiveCategories(),
   ]);
+
+  // Phase 11.1: journal heatmap. Widened to whole-months so spillover days at
+  // edges of the multi-month grid render correctly.
+  const today = todayLocal();
+  const heatmapEnd = today;
+  const heatmapStart = addDays(today, -(range - 1));
+  const monthsStart = firstOfMonth(heatmapStart);
+  const monthsEnd = heatmapEnd; // getJournalMonthStatus accepts arbitrary ranges
+  const journalStatusByDate = await getJournalMonthStatus(monthsStart, monthsEnd);
+
+  // Phase 11.1: XP overview across all active habits.
+  const xpByHabit = await getXpByHabit();
   const pomoStreak = computeStreaks(allPomoDates);
   const perDateMap = buildPerDateMap(pomoWindow.daily);
   // Serialize the Map<string, DayCategoryAgg> in each daily row so the
@@ -266,6 +283,23 @@ export default async function InsightsPage({
           />
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="font-serif text-lg font-normal">
+            Journal at a glance
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <JournalMonthGrid
+            start={monthsStart}
+            end={monthsEnd}
+            statusByDate={journalStatusByDate}
+          />
+        </CardContent>
+      </Card>
+
+      <HabitsXpCard habits={allActiveHabits} xpByHabit={xpByHabit} />
     </div>
   );
 }

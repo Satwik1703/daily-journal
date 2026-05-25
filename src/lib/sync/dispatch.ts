@@ -18,6 +18,7 @@ import {
   updateTaskText,
   deleteTask,
   moveJournalTask,
+  reorderTasks,
 } from "@/app/actions/journal-tasks";
 import {
   createQuestion,
@@ -40,6 +41,13 @@ import {
 } from "@/app/actions/pomodoro-categories";
 import { setPomodoroSound } from "@/app/actions/settings";
 import {
+  createBook,
+  updateBook,
+  deleteBook,
+  reorderBooks,
+  setActiveBook,
+} from "@/app/actions/books";
+import {
   createGoal,
   updateGoalCascade,
   deleteGoalCascade,
@@ -53,6 +61,7 @@ import {
   toggleChecklistItem,
   deleteChecklistItem,
   saveReflection,
+  extendReverseCascade,
 } from "@/app/actions/goals";
 import {
   logBodyWeight,
@@ -104,6 +113,7 @@ export const DISPATCH: Record<string, AnyAction> = {
   update_task_text: updateTaskText,
   delete_task: (args: { id: string }) => deleteTask(args.id),
   move_task: moveJournalTask,
+  reorder_tasks: reorderTasks,
 
   // journal questions (settings)
   create_question: createQuestion,
@@ -127,6 +137,13 @@ export const DISPATCH: Record<string, AnyAction> = {
   // settings
   set_pomo_sound: (args: { soundId: string }) => setPomodoroSound(args.soundId),
 
+  // books (Phase 11.1)
+  create_book: createBook,
+  update_book: updateBook,
+  delete_book: (args: { id: string }) => deleteBook(args.id),
+  reorder_books: (args: { orderedIds: string[] }) => reorderBooks(args.orderedIds),
+  set_active_book: (args: { bookId: string | null }) => setActiveBook(args.bookId),
+
   // goals
   create_goal: createGoal,
   update_goal_cascade: updateGoalCascade,
@@ -141,6 +158,7 @@ export const DISPATCH: Record<string, AnyAction> = {
   toggle_checklist_item: (args: { itemId: string }) => toggleChecklistItem(args.itemId),
   delete_checklist_item: (args: { id: string }) => deleteChecklistItem(args.id),
   save_reflection: saveReflection,
+  extend_reverse_cascade: extendReverseCascade,
 
   // gym (Phase 9)
   create_split: createSplit,

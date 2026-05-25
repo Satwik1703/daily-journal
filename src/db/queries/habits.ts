@@ -1,16 +1,19 @@
 import { db } from "@/db/client";
 import { habits, habitLogs, habitValueLogs, pomodoroSessions } from "@/db/schema";
-import { and, asc, between, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, between, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { addDays, parseDate, todayLocal, type DateString } from "@/lib/dates";
 import {
   isHabitActiveOnWeekday,
   isHabitDoneOnDate,
+  xpForHabit,
   type HabitTrackingKind,
 } from "@/lib/habit-meta";
 
 export type Habit = typeof habits.$inferSelect;
 export type HabitLog = typeof habitLogs.$inferSelect;
 export type HabitValueLog = typeof habitValueLogs.$inferSelect;
+/** Alias used by client UI imports (today-toggles). */
+export type HabitValueLogRow = HabitValueLog;
 
 export async function getActiveHabits(): Promise<Habit[]> {
   return db
@@ -195,4 +198,100 @@ export async function isActiveHabit(id: string): Promise<boolean> {
     .where(and(eq(habits.id, id), isNull(habits.archivedAt)))
     .limit(1);
   return rows.length > 0;
+}
+
+// Phase 11.1: deltas history per habit on a single date. Used by the NumberRow
+// popover to list and delete individual entries.
+export async function getValueLogsOnDate(
+  date: DateString,
+): Promise<Record<string, HabitValueLog[]>> {
+  const rows = await db
+    .select()
+    .from(habitValueLogs)
+    .where(eq(habitValueLogs.date, date))
+    .orderBy(desc(habitValueLogs.createdAt));
+  const out: Record<string, HabitValueLog[]> = {};
+  for (const r of rows) {
+    let arr = out[r.habitId];
+    if (!arr) {
+      arr = [];
+      out[r.habitId] = arr;
+    }
+    arr.push(r);
+  }
+  return out;
+}
+
+/**
+ * Phase 11.1: all-time XP per habit. Derived live from logs (no persisted
+ * field). Three queries (binary count, number per-day sums, pomo per-day
+ * counts) then aggregated in JS so we never N+1.
+ */
+export async function getXpByHabit(): Promise<Record<string, number>> {
+  const [active, allBinary, allValue, allPomo] = await Promise.all([
+    db.select().from(habits),
+    db.select().from(habitLogs),
+    db.select().from(habitValueLogs),
+    db
+      .select({ date: pomodoroSessions.date, categoryId: pomodoroSessions.categoryId })
+      .from(pomodoroSessions),
+  ]);
+
+  // Binary: count per habit.
+  const binaryDays = new Map<string, number>();
+  for (const r of allBinary) {
+    binaryDays.set(r.habitId, (binaryDays.get(r.habitId) ?? 0) + 1);
+  }
+
+  // Number: per-habit per-date sums.
+  const valueSumByHabitDate = new Map<string, Map<string, number>>();
+  for (const r of allValue) {
+    let m = valueSumByHabitDate.get(r.habitId);
+    if (!m) {
+      m = new Map();
+      valueSumByHabitDate.set(r.habitId, m);
+    }
+    m.set(r.date, (m.get(r.date) ?? 0) + r.value);
+  }
+
+  // Pomo: per-category per-date counts.
+  const pomoCountByCatDate = new Map<string, Map<string, number>>();
+  for (const r of allPomo) {
+    if (!r.categoryId) continue;
+    let m = pomoCountByCatDate.get(r.categoryId);
+    if (!m) {
+      m = new Map();
+      pomoCountByCatDate.set(r.categoryId, m);
+    }
+    m.set(r.date, (m.get(r.date) ?? 0) + 1);
+  }
+
+  const out: Record<string, number> = {};
+  for (const h of active) {
+    const kind = h.trackingKind as HabitTrackingKind;
+    let qualifyingDays = 0;
+    if (kind === "binary") {
+      qualifyingDays = binaryDays.get(h.id) ?? 0;
+    } else if (kind === "number") {
+      const m = valueSumByHabitDate.get(h.id);
+      if (m && h.dailyTarget != null && h.dailyTarget > 0) {
+        for (const sum of m.values()) {
+          if (sum >= h.dailyTarget) qualifyingDays++;
+        }
+      } else if (m) {
+        qualifyingDays = m.size; // any-positive-counts when no target
+      }
+    } else if (kind === "pomodoro" && h.pomoCategoryId) {
+      const m = pomoCountByCatDate.get(h.pomoCategoryId);
+      if (m && h.dailyTarget != null && h.dailyTarget > 0) {
+        for (const count of m.values()) {
+          if (count >= h.dailyTarget) qualifyingDays++;
+        }
+      } else if (m) {
+        qualifyingDays = m.size;
+      }
+    }
+    out[h.id] = xpForHabit(qualifyingDays, h.difficulty ?? 1);
+  }
+  return out;
 }

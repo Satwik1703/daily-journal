@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Dumbbell, Settings, BarChart3, ChevronRight } from "lucide-react";
+import { Dumbbell, Settings, BarChart3, BookOpen, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 type MoreItem = {
@@ -21,6 +21,12 @@ const items: MoreItem[] = [
     label: "Gym",
     description: "Log workouts, see the muscle heatmap.",
     Icon: Dumbbell,
+  },
+  {
+    href: "/books",
+    label: "Books",
+    description: "Reading log, ratings, pages-per-day via the Read habit.",
+    Icon: BookOpen,
   },
   {
     href: "/settings",
