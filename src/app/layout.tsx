@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { BottomNav } from "@/components/bottom-nav";
 import { SyncBootstrap } from "@/components/sync-bootstrap";
+import { DeviceNicknameDialog } from "@/components/device-nickname-dialog";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -60,6 +61,7 @@ export default function RootLayout({
           </main>
           <BottomNav />
           <SyncBootstrap />
+          <DeviceNicknameDialog />
           <Toaster position="top-center" richColors />
         </ThemeProvider>
         <Script id="register-sw" strategy="afterInteractive">

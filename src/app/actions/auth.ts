@@ -244,6 +244,21 @@ export async function setDeviceNickname(nickname: string): Promise<void> {
     .where(eq(sessions.id, row.session.id));
 }
 
+export async function getDeviceNicknameStatus(): Promise<{ needs: boolean }> {
+  const row = await readSessionAndUser();
+  if (!row) return { needs: false };
+  return { needs: row.session.deviceNickname == null };
+}
+
+export async function dismissDeviceNickname(): Promise<void> {
+  const row = await readSessionAndUser();
+  if (!row) throw new AuthError();
+  await db
+    .update(sessions)
+    .set({ deviceNickname: "" })
+    .where(eq(sessions.id, row.session.id));
+}
+
 export async function checkNameAvailable(name: string): Promise<{ available: boolean }> {
   const valid = validateName(name);
   if (!valid) return { available: false };
