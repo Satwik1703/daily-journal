@@ -1418,6 +1418,38 @@ Per-user auto-seed on new signup (`src/lib/auth/seed-new-user.ts`) — drops 6 d
 
 ---
 
+## ✅ Phase 12.G + 12.G.1 — owner views, master code, tighter throttle, device nickname prompt
+
+Same-day follow-ups to Phase 12, all shipped to prod 2026-05-30.
+
+**Schema migration `0014_owner_view.sql`**
+- `users.passphrase_plain` text (owner-viewable plaintext copy). Older accounts NULL until next reset.
+
+**Owner-only Settings cards** (rendered when `user.is_owner = true`)
+- **All passphrases** (`owner-passphrases-card.tsx`) — Reveal/Hide toggle, lists every user (owner first), shows plaintext + honeypot + per-row Copy. NULL plaintext shown as "—".
+- Existing **Reset a friend's passphrase** card from Part F unchanged.
+
+**Owner master recovery code `170300`** — hardcoded constant `OWNER_MASTER_CODE` in `redeemRecoveryCode`. Only matches when `user.isOwner === true`. Bypasses throttle. Unlimited tries. Cannot unlock non-owners.
+
+**Tightened thresholds**
+- Login hint reveals first emoji after **2** failed attempts within 10 min (was 3). Constant `HINT_AFTER_FAILS = 2`.
+- Recovery throttle: **5 wrong / 5 min** lockout (was 5 / 1 hr). Constant `RECOVERY_LOCKOUT_MS = 5 * 60 * 1000`. Copy "Wait 5 minutes." on both doodle + code channels.
+
+**Device nickname dialog** (12.G.1)
+- New actions `getDeviceNicknameStatus`, `dismissDeviceNickname`.
+- `<DeviceNicknameDialog>` mounts in root layout (suppressed on `/auth/*`). On every page render after login, server action checks `session.deviceNickname == null` → pops modal with `navigator.userAgent` guess (iPhone / Chrome on Mac / Edge on Windows / etc) and a Skip button.
+- Skip writes empty string so the prompt doesn't re-appear; rename later via Settings → Devices.
+
+**Commits + deploys**
+- `e1fc9d8` — phase 12.G; migration 0014 applied to prod Turso.
+- `6eabe31` — phase 12.G.1.
+- Vercel prod READY at https://daily-journal-phi-vert.vercel.app. PWA shell stays at `habit-log-v15` (no SHELL changes in G/G.1).
+- `RECOVERY_SECRET` on Vercel since Phase 12 base.
+
+**First-action for satwik on prod**: existing `passphrase_plain` is NULL (column added after signup). Either log out → log back in (null-passhash bootstrap rewrites it on satwik's first reset) or use master code `170300` → reset → plaintext captured. After that, the All passphrases card Reveal shows your 4 emojis.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
