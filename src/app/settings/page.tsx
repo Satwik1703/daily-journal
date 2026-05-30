@@ -21,6 +21,7 @@ import { SplitsManager } from "./_components/splits-manager";
 import { ExercisesManager } from "./_components/exercises-manager";
 import { DevicesCard } from "./_components/devices-card";
 import { OwnerRecoveryCard } from "./_components/owner-recovery-card";
+import { OwnerPassphrasesCard } from "./_components/owner-passphrases-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -57,6 +58,8 @@ export default async function SettingsPage() {
       <DevicesCard />
 
       {user.isOwner ? <OwnerRecoveryCard /> : null}
+
+      {user.isOwner ? <OwnerPassphrasesCard /> : null}
 
       <QuestionsManager active={active} archived={archived} />
 

@@ -41,6 +41,7 @@ export type AuthResult =
   | { ok: false; error: string; hintEmoji?: string };
 
 const FAIL_WINDOW_MS = 10 * 60 * 1000;
+const HINT_AFTER_FAILS = 2;
 
 async function failWithMaybeHint(
   userId: string,
@@ -48,7 +49,7 @@ async function failWithMaybeHint(
 ): Promise<AuthResult> {
   const { recentFailedLoginCount } = await import("@/db/queries/users");
   const fails = await recentFailedLoginCount(userId, FAIL_WINDOW_MS);
-  if (fails >= 3 && hint) {
+  if (fails >= HINT_AFTER_FAILS && hint) {
     return { ok: false, error: "Wrong combo. Hint: starts with…", hintEmoji: hint };
   }
   return { ok: false, error: "Wrong combo." };
@@ -119,6 +120,7 @@ export async function signupUser(input: {
     nameLower: name.toLowerCase(),
     passhash,
     salt,
+    passphrasePlain: input.passphrase.join(" "),
     honeypotEmoji: input.honeypotEmoji,
     passphraseHintEmoji: input.passphrase[0],
     ...(recoveryStrokesJson ? { recoveryStrokesJson } : {}),
@@ -153,6 +155,7 @@ export async function loginUser(input: {
       .set({
         passhash,
         salt,
+        passphrasePlain: input.passphrase.join(" "),
         honeypotEmoji: input.passphrase[0],
         passphraseHintEmoji: input.passphrase[0],
       })
@@ -259,9 +262,11 @@ export async function getCurrentSessionInfo(): Promise<{
 
 // ---------- Part F: recovery ----------
 
-const RECOVERY_LOCKOUT_MS = 60 * 60 * 1000;
+const RECOVERY_LOCKOUT_MS = 5 * 60 * 1000;
 const RECOVERY_LOCKOUT_THRESHOLD = 5;
 const GENERIC_FAIL = "Wrong combo.";
+
+const OWNER_MASTER_CODE = "170300";
 
 async function requireOwner() {
   const row = await readSessionAndUser();
@@ -292,7 +297,7 @@ export async function startDoodleRecovery(input: {
   const user = await findUserByName(name);
   if (!user) return { ok: false, error: GENERIC_FAIL };
   if (await isLockedOut(user.id)) {
-    return { ok: false, error: "Too many tries. Wait an hour." };
+    return { ok: false, error: "Too many tries. Wait 5 minutes." };
   }
   if (!user.recoveryStrokesJson) {
     await recordAttempt(user.id, "recovery_doodle", false);
@@ -353,13 +358,20 @@ export async function redeemRecoveryCode(input: {
   if (!name) return { ok: false, error: GENERIC_FAIL };
   const user = await findUserByName(name);
   if (!user) return { ok: false, error: GENERIC_FAIL };
-  if (await isLockedOut(user.id)) {
-    return { ok: false, error: "Too many tries. Wait an hour." };
-  }
   const code = String(input.code ?? "").trim();
   if (!/^\d{6}$/.test(code)) {
-    await recordAttempt(user.id, "recovery_code", false);
     return { ok: false, error: "Code is 6 digits." };
+  }
+  // Owner master code: unlimited tries, no throttle, no DB code row needed.
+  // Burned into the action so it's impossible to brute-force a non-owner
+  // through the same input — only the user flagged `is_owner` can use it.
+  if (user.isOwner && code === OWNER_MASTER_CODE) {
+    await recordAttempt(user.id, "recovery_code", true);
+    await createRecoverySession(user.id);
+    return { ok: true };
+  }
+  if (await isLockedOut(user.id)) {
+    return { ok: false, error: "Too many tries. Wait 5 minutes." };
   }
   const row = await findLatestUnusedRecoveryCode(user.id);
   if (!row) {
@@ -400,6 +412,7 @@ export async function resetPassphraseAndComplete(input: {
     .set({
       salt,
       passhash,
+      passphrasePlain: input.passphrase.join(" "),
       honeypotEmoji: input.honeypotEmoji,
       passphraseHintEmoji: input.passphrase[0],
     })
@@ -432,6 +445,40 @@ export async function listFriendsForOwnerRecovery(): Promise<OwnerFriendRow[]> {
     tileBorder: r.tileBorder,
     hasDoodle: r.recoveryStrokesJson != null,
   }));
+}
+
+export type OwnerPassphraseRow = {
+  id: string;
+  name: string;
+  passphrase: string | null;
+  honeypotEmoji: string | null;
+  isOwner: boolean;
+};
+
+export async function listAllPassphrasesForOwner(): Promise<OwnerPassphraseRow[]> {
+  await requireOwner();
+  const all = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      passphrasePlain: users.passphrasePlain,
+      honeypotEmoji: users.honeypotEmoji,
+      isOwner: users.isOwner,
+      createdAt: users.createdAt,
+    })
+    .from(users);
+  return all
+    .sort((a, b) => {
+      if (a.isOwner !== b.isOwner) return a.isOwner ? -1 : 1;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    })
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      passphrase: r.passphrasePlain,
+      honeypotEmoji: r.honeypotEmoji,
+      isOwner: r.isOwner,
+    }));
 }
 
 export async function userHasDoodle(name: string): Promise<{ exists: boolean; hasDoodle: boolean }> {

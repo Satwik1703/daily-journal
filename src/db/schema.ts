@@ -441,6 +441,7 @@ export const users = sqliteTable(
     nameLower: text("name_lower").notNull(),
     passhash: text("passhash"),
     salt: text("salt"),
+    passphrasePlain: text("passphrase_plain"),
     honeypotEmoji: text("honeypot_emoji"),
     passphraseHintEmoji: text("passphrase_hint_emoji"),
     tileGradientFrom: text("tile_gradient_from").notNull().default("#4fa896"),
