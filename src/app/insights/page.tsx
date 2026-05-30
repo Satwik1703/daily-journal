@@ -1,12 +1,13 @@
 import { getRangeData } from "@/db/queries/insights";
 import { db } from "@/db/client";
 import { habitLogs, habits } from "@/db/schema";
-import { isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { computeStreaks } from "@/lib/streaks";
 import { getHabitsSnapshot } from "@/db/queries/habits";
 import { formatLocalYMD } from "@/lib/dates";
 import { getPomodoroWindow, getAllSessionDates } from "@/db/queries/pomodoro";
 import { getActiveCategories } from "@/db/queries/pomodoro-categories";
+import { requireUser } from "@/lib/auth/context";
 import { fmtMinutes, fmtPomos } from "@/lib/pomodoro-meta";
 import { RangeToggle } from "./_components/range-toggle";
 import { MoodEnergyChart } from "./_components/mood-energy-chart";
@@ -44,19 +45,17 @@ export default async function InsightsPage({
 }) {
   const sp = await searchParams;
   const range = clampRange(sp.range);
+  const { user } = await requireUser();
 
   // Range data
-  const data = await getRangeData(range);
+  const data = await getRangeData(user.id, range);
 
-  // Snapshot for the configurable Habit Timeline section (filtered to habits
-  // that existed on or before each day they're shown on — same rule as /habits/[date]).
-  const habitsSnapshot = await getHabitsSnapshot({ windowDays: range });
+  const habitsSnapshot = await getHabitsSnapshot(user.id, { windowDays: range });
 
-  // Pomodoro window + streak (across all history) + active categories
   const [pomoWindow, allPomoDates, pomoCategories] = await Promise.all([
-    getPomodoroWindow(range),
-    getAllSessionDates(),
-    getActiveCategories(),
+    getPomodoroWindow(user.id, range),
+    getAllSessionDates(user.id),
+    getActiveCategories(user.id),
   ]);
 
   // Phase 11.1: journal heatmap. Widened to whole-months so spillover days at
@@ -65,11 +64,10 @@ export default async function InsightsPage({
   const heatmapEnd = today;
   const heatmapStart = addDays(today, -(range - 1));
   const monthsStart = firstOfMonth(heatmapStart);
-  const monthsEnd = heatmapEnd; // getJournalMonthStatus accepts arbitrary ranges
-  const journalStatusByDate = await getJournalMonthStatus(monthsStart, monthsEnd);
+  const monthsEnd = heatmapEnd;
+  const journalStatusByDate = await getJournalMonthStatus(user.id, monthsStart, monthsEnd);
 
-  // Phase 11.1: XP overview across all active habits.
-  const xpByHabit = await getXpByHabit();
+  const xpByHabit = await getXpByHabit(user.id);
   const pomoStreak = computeStreaks(allPomoDates);
   const perDateMap = buildPerDateMap(pomoWindow.daily);
   // Serialize the Map<string, DayCategoryAgg> in each daily row so the
@@ -82,10 +80,15 @@ export default async function InsightsPage({
     byCategory: Array.from(d.byCategory.values()),
   }));
 
-  // Streaks (use ALL habit logs ever, not just window — streaks can extend beyond range)
   const [allActiveHabits, allLogs] = await Promise.all([
-    db.select().from(habits).where(isNull(habits.archivedAt)),
-    db.select({ habitId: habitLogs.habitId, date: habitLogs.date }).from(habitLogs),
+    db
+      .select()
+      .from(habits)
+      .where(and(eq(habits.userId, user.id), isNull(habits.archivedAt))),
+    db
+      .select({ habitId: habitLogs.habitId, date: habitLogs.date })
+      .from(habitLogs)
+      .where(eq(habitLogs.userId, user.id)),
   ]);
   const logsByHabit = new Map<string, string[]>();
   for (const l of allLogs) {

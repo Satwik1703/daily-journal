@@ -7,6 +7,7 @@ import {
 } from "@/db/queries/gym";
 import { getBodyWeightForRange } from "@/db/queries/body-weight";
 import { addDays, isoWeekKey, todayLocal } from "@/lib/dates";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +16,18 @@ export async function GET(
   ctx: { params: Promise<{ range: string }> },
 ) {
   const { range } = await ctx.params;
+  const session = await getCurrentUser();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.user.id;
   const r = clampGymRange(range);
   const today = todayLocal();
   const start = addDays(today, -(r - 1));
 
   const [window, weekCompare, allWorkouts, bodyWeightSeries] = await Promise.all([
-    getGymInsightsWindow(r),
-    getGymWeekCompare(),
-    getAllWorkoutsLight(),
-    getBodyWeightForRange(start, today),
+    getGymInsightsWindow(userId, r),
+    getGymWeekCompare(userId),
+    getAllWorkoutsLight(userId),
+    getBodyWeightForRange(userId, start, today),
   ]);
 
   // Split streaks across full workout history.

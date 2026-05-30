@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { habits, habitLogs, habitValueLogs, pomodoroSessions } from "@/db/schema";
-import { between } from "drizzle-orm";
+import { and, between, eq } from "drizzle-orm";
 import { formatLocalYMD, parseDate, type DateString } from "@/lib/dates";
 import { computeHabitsStatus, type JournalStatus } from "@/lib/journal-status";
 import {
@@ -22,6 +22,7 @@ import {
  *  - pomodoro → COUNT(pomodoro_sessions) for linked category that date >= dailyTarget
  */
 export async function getHabitsMonthStatus(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<Record<DateString, JournalStatus>> {
@@ -36,11 +37,14 @@ export async function getHabitsMonthStatus(
         archivedAt: habits.archivedAt,
         weekdayMask: habits.weekdayMask,
       })
-      .from(habits),
+      .from(habits)
+      .where(eq(habits.userId, userId)),
     db
       .select({ date: habitLogs.date, habitId: habitLogs.habitId })
       .from(habitLogs)
-      .where(between(habitLogs.date, start, end)),
+      .where(
+        and(eq(habitLogs.userId, userId), between(habitLogs.date, start, end)),
+      ),
     db
       .select({
         date: habitValueLogs.date,
@@ -48,14 +52,24 @@ export async function getHabitsMonthStatus(
         value: habitValueLogs.value,
       })
       .from(habitValueLogs)
-      .where(between(habitValueLogs.date, start, end)),
+      .where(
+        and(
+          eq(habitValueLogs.userId, userId),
+          between(habitValueLogs.date, start, end),
+        ),
+      ),
     db
       .select({
         date: pomodoroSessions.date,
         categoryId: pomodoroSessions.categoryId,
       })
       .from(pomodoroSessions)
-      .where(between(pomodoroSessions.date, start, end)),
+      .where(
+        and(
+          eq(pomodoroSessions.userId, userId),
+          between(pomodoroSessions.date, start, end),
+        ),
+      ),
   ]);
 
   // Binary logs → habitId → set of dates with a log row.

@@ -3,6 +3,7 @@
 import { getHabitsMonthStatus } from "@/db/queries/habits-month";
 import { addDays, firstOfMonth, isValidDateString, shiftMonth } from "@/lib/dates";
 import type { JournalStatus } from "@/lib/journal-status";
+import { requireUser } from "@/lib/auth/context";
 
 export async function fetchHabitsMonthStatus(
   monthAnchor: string,
@@ -10,7 +11,8 @@ export async function fetchHabitsMonthStatus(
   if (!isValidDateString(monthAnchor)) {
     throw new Error(`Invalid month anchor: ${monthAnchor}`);
   }
+  const { user } = await requireUser();
   const start = addDays(firstOfMonth(monthAnchor), -7);
   const end = addDays(shiftMonth(monthAnchor, 1), 7);
-  return getHabitsMonthStatus(start, end);
+  return getHabitsMonthStatus(user.id, start, end);
 }

@@ -12,76 +12,94 @@ import {
 export type Habit = typeof habits.$inferSelect;
 export type HabitLog = typeof habitLogs.$inferSelect;
 export type HabitValueLog = typeof habitValueLogs.$inferSelect;
-/** Alias used by client UI imports (today-toggles). */
 export type HabitValueLogRow = HabitValueLog;
 
-export async function getActiveHabits(): Promise<Habit[]> {
+export async function getActiveHabits(userId: string): Promise<Habit[]> {
   return db
     .select()
     .from(habits)
-    .where(isNull(habits.archivedAt))
+    .where(and(eq(habits.userId, userId), isNull(habits.archivedAt)))
     .orderBy(asc(habits.position), asc(habits.createdAt));
 }
 
-export async function getArchivedHabits(): Promise<Habit[]> {
+export async function getArchivedHabits(userId: string): Promise<Habit[]> {
   return db
     .select()
     .from(habits)
-    .where(isNotNull(habits.archivedAt))
+    .where(and(eq(habits.userId, userId), isNotNull(habits.archivedAt)))
     .orderBy(asc(habits.archivedAt));
 }
 
-export async function getLogsOnDate(date: DateString): Promise<HabitLog[]> {
-  return db.select().from(habitLogs).where(eq(habitLogs.date, date));
+export async function getLogsOnDate(
+  userId: string,
+  date: DateString,
+): Promise<HabitLog[]> {
+  return db
+    .select()
+    .from(habitLogs)
+    .where(and(eq(habitLogs.userId, userId), eq(habitLogs.date, date)));
 }
 
-export async function getLogsInRange(start: DateString, end: DateString): Promise<HabitLog[]> {
-  return db.select().from(habitLogs).where(between(habitLogs.date, start, end));
+export async function getLogsInRange(
+  userId: string,
+  start: DateString,
+  end: DateString,
+): Promise<HabitLog[]> {
+  return db
+    .select()
+    .from(habitLogs)
+    .where(
+      and(eq(habitLogs.userId, userId), between(habitLogs.date, start, end)),
+    );
 }
 
-/** Per-day value sums for the given range, grouped by habit_id then date. */
 export async function getValueLogsInRange(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<HabitValueLog[]> {
   return db
     .select()
     .from(habitValueLogs)
-    .where(between(habitValueLogs.date, start, end));
+    .where(
+      and(
+        eq(habitValueLogs.userId, userId),
+        between(habitValueLogs.date, start, end),
+      ),
+    );
 }
 
-/** Per-day session counts grouped by category for the given range. */
 export async function getPomoSessionsInRange(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<Array<{ date: string; categoryId: string | null }>> {
   return db
     .select({ date: pomodoroSessions.date, categoryId: pomodoroSessions.categoryId })
     .from(pomodoroSessions)
-    .where(between(pomodoroSessions.date, start, end));
+    .where(
+      and(
+        eq(pomodoroSessions.userId, userId),
+        between(pomodoroSessions.date, start, end),
+      ),
+    );
 }
 
 export type HabitsSnapshot = {
-  /** All non-archived habits (no weekday-mask filtering). Use for grids spanning a range. */
   active: Habit[];
-  /** Subset of `active` whose `weekdayMask` includes `anchor`'s weekday. */
   activeForAnchor: Habit[];
   archived: Habit[];
-  /** The date the page is centered on. Today by default; a past date when backfilling. */
   anchor: DateString;
   today: DateString;
-  /** Habits that are "done" on `anchor` per their tracking kind. */
   doneOnAnchorIds: Set<string>;
-  /** Map<habitId, Set<dateString>> for the last `windowDays` ending on `anchor` (binary kind). */
   windowLogs: Map<string, Set<DateString>>;
-  /** Map<habitId, Map<dateString, sumValue>> for number-kind habits. */
   windowValuesByHabit: Map<string, Map<DateString, number>>;
-  /** Map<habitId, Map<dateString, sessionCount>> for pomo-kind habits. */
   windowPomoByHabit: Map<string, Map<DateString, number>>;
   windowDates: DateString[];
 };
 
 export async function getHabitsSnapshot(
+  userId: string,
   opts: { anchor?: DateString; windowDays?: number } = {},
 ): Promise<HabitsSnapshot> {
   const today = todayLocal();
@@ -90,20 +108,18 @@ export async function getHabitsSnapshot(
   const start = addDays(anchor, -(windowDays - 1));
 
   const [active, archived, rangeLogs, valueLogs, pomoSessions] = await Promise.all([
-    getActiveHabits(),
-    getArchivedHabits(),
-    getLogsInRange(start, anchor),
-    getValueLogsInRange(start, anchor),
-    getPomoSessionsInRange(start, anchor),
+    getActiveHabits(userId),
+    getArchivedHabits(userId),
+    getLogsInRange(userId, start, anchor),
+    getValueLogsInRange(userId, start, anchor),
+    getPomoSessionsInRange(userId, start, anchor),
   ]);
 
-  // Phase 10: subset for `anchor`-day rendering (weekday mask filter).
   const anchorWeekday = parseDate(anchor).getDay();
   const activeForAnchor = active.filter((h) =>
     isHabitActiveOnWeekday(h.weekdayMask, anchorWeekday),
   );
 
-  // ----- Binary windowLogs -----
   const windowLogs = new Map<string, Set<DateString>>();
   for (const log of rangeLogs) {
     let set = windowLogs.get(log.habitId);
@@ -114,7 +130,6 @@ export async function getHabitsSnapshot(
     set.add(log.date);
   }
 
-  // ----- Number values: habitId -> (date -> sum) -----
   const windowValuesByHabit = new Map<string, Map<DateString, number>>();
   for (const v of valueLogs) {
     let dayMap = windowValuesByHabit.get(v.habitId);
@@ -125,7 +140,6 @@ export async function getHabitsSnapshot(
     dayMap.set(v.date, (dayMap.get(v.date) ?? 0) + v.value);
   }
 
-  // ----- Pomo sessions: build (categoryId -> date -> count) then bind to pomo-kind habits -----
   const sessionsByCatDate = new Map<string, Map<DateString, number>>();
   for (const s of pomoSessions) {
     if (!s.categoryId) continue;
@@ -144,7 +158,6 @@ export async function getHabitsSnapshot(
     if (catMap) windowPomoByHabit.set(h.id, new Map(catMap));
   }
 
-  // ----- doneOnAnchorIds via kind-aware check (only for masked-on habits) -----
   const doneOnAnchorIds = new Set<string>();
   for (const h of activeForAnchor) {
     const kind = h.trackingKind as HabitTrackingKind;
@@ -179,36 +192,48 @@ export async function getHabitsSnapshot(
   };
 }
 
-export async function findHabitById(id: string): Promise<Habit | null> {
-  const rows = await db.select().from(habits).where(eq(habits.id, id)).limit(1);
+export async function findHabitById(
+  userId: string,
+  id: string,
+): Promise<Habit | null> {
+  const rows = await db
+    .select()
+    .from(habits)
+    .where(and(eq(habits.userId, userId), eq(habits.id, id)))
+    .limit(1);
   return rows[0] ?? null;
 }
 
-export async function nextPosition(): Promise<number> {
-  const all = await db.select({ position: habits.position }).from(habits);
+export async function nextPosition(userId: string): Promise<number> {
+  const all = await db
+    .select({ position: habits.position })
+    .from(habits)
+    .where(eq(habits.userId, userId));
   if (all.length === 0) return 0;
   return Math.max(...all.map((r) => r.position)) + 1;
 }
 
-// Used to validate (habitId belongs to non-archived habit) before logging.
-export async function isActiveHabit(id: string): Promise<boolean> {
+export async function isActiveHabit(userId: string, id: string): Promise<boolean> {
   const rows = await db
     .select({ archivedAt: habits.archivedAt })
     .from(habits)
-    .where(and(eq(habits.id, id), isNull(habits.archivedAt)))
+    .where(
+      and(eq(habits.userId, userId), eq(habits.id, id), isNull(habits.archivedAt)),
+    )
     .limit(1);
   return rows.length > 0;
 }
 
-// Phase 11.1: deltas history per habit on a single date. Used by the NumberRow
-// popover to list and delete individual entries.
 export async function getValueLogsOnDate(
+  userId: string,
   date: DateString,
 ): Promise<Record<string, HabitValueLog[]>> {
   const rows = await db
     .select()
     .from(habitValueLogs)
-    .where(eq(habitValueLogs.date, date))
+    .where(
+      and(eq(habitValueLogs.userId, userId), eq(habitValueLogs.date, date)),
+    )
     .orderBy(desc(habitValueLogs.createdAt));
   const out: Record<string, HabitValueLog[]> = {};
   for (const r of rows) {
@@ -222,28 +247,22 @@ export async function getValueLogsOnDate(
   return out;
 }
 
-/**
- * Phase 11.1: all-time XP per habit. Derived live from logs (no persisted
- * field). Three queries (binary count, number per-day sums, pomo per-day
- * counts) then aggregated in JS so we never N+1.
- */
-export async function getXpByHabit(): Promise<Record<string, number>> {
+export async function getXpByHabit(userId: string): Promise<Record<string, number>> {
   const [active, allBinary, allValue, allPomo] = await Promise.all([
-    db.select().from(habits),
-    db.select().from(habitLogs),
-    db.select().from(habitValueLogs),
+    db.select().from(habits).where(eq(habits.userId, userId)),
+    db.select().from(habitLogs).where(eq(habitLogs.userId, userId)),
+    db.select().from(habitValueLogs).where(eq(habitValueLogs.userId, userId)),
     db
       .select({ date: pomodoroSessions.date, categoryId: pomodoroSessions.categoryId })
-      .from(pomodoroSessions),
+      .from(pomodoroSessions)
+      .where(eq(pomodoroSessions.userId, userId)),
   ]);
 
-  // Binary: count per habit.
   const binaryDays = new Map<string, number>();
   for (const r of allBinary) {
     binaryDays.set(r.habitId, (binaryDays.get(r.habitId) ?? 0) + 1);
   }
 
-  // Number: per-habit per-date sums.
   const valueSumByHabitDate = new Map<string, Map<string, number>>();
   for (const r of allValue) {
     let m = valueSumByHabitDate.get(r.habitId);
@@ -254,7 +273,6 @@ export async function getXpByHabit(): Promise<Record<string, number>> {
     m.set(r.date, (m.get(r.date) ?? 0) + r.value);
   }
 
-  // Pomo: per-category per-date counts.
   const pomoCountByCatDate = new Map<string, Map<string, number>>();
   for (const r of allPomo) {
     if (!r.categoryId) continue;
@@ -279,7 +297,7 @@ export async function getXpByHabit(): Promise<Record<string, number>> {
           if (sum >= h.dailyTarget) qualifyingDays++;
         }
       } else if (m) {
-        qualifyingDays = m.size; // any-positive-counts when no target
+        qualifyingDays = m.size;
       }
     } else if (kind === "pomodoro" && h.pomoCategoryId) {
       const m = pomoCountByCatDate.get(h.pomoCategoryId);

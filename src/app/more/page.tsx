@@ -1,6 +1,16 @@
 import Link from "next/link";
-import { Dumbbell, Settings, BarChart3, BookOpen, ChevronRight } from "lucide-react";
+import {
+  Dumbbell,
+  Settings,
+  BarChart3,
+  BookOpen,
+  ChevronRight,
+  Users,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { requireUser } from "@/lib/auth/context";
+import { SignOutButton } from "./_components/sign-out-button";
+import { UserTile } from "@/components/user-tile";
 
 type MoreItem = {
   href: string;
@@ -29,6 +39,12 @@ const items: MoreItem[] = [
     Icon: BookOpen,
   },
   {
+    href: "/auth/switch",
+    label: "Switch user",
+    description: "Pick a different tile on this device.",
+    Icon: Users,
+  },
+  {
     href: "/settings",
     label: "Settings",
     description: "Daily questions, pomodoro categories, sound, and more.",
@@ -36,13 +52,35 @@ const items: MoreItem[] = [
   },
 ];
 
-export default function MorePage() {
+export const dynamic = "force-dynamic";
+
+export default async function MorePage() {
+  const { user } = await requireUser();
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
       <div>
         <h1 className="font-serif text-2xl font-normal leading-tight">More</h1>
         <p className="text-xs text-muted-foreground">Everything else.</p>
       </div>
+
+      <Card>
+        <CardContent className="flex items-center gap-3 py-4">
+          <UserTile
+            name={user.name}
+            gradientFrom={user.tileGradientFrom}
+            gradientTo={user.tileGradientTo}
+            font={user.tileFont}
+            border={user.tileBorder}
+            size={48}
+          />
+          <div className="flex-1">
+            <div className="font-medium leading-tight">Signed in as {user.name}</div>
+            <div className="text-xs text-muted-foreground">
+              Each user&apos;s data is private. Switch from below.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="space-y-3">
         {items.map(({ href, label, description, Icon }) => (
@@ -64,6 +102,8 @@ export default function MorePage() {
           </Link>
         ))}
       </div>
+
+      <SignOutButton />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   PRESET_COLORS,
   type HabitTrackingKind,
 } from "@/lib/habit-meta";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_NAME_LEN = 80;
 const MAX_EMOJI_LEN = 8;
@@ -88,11 +89,13 @@ function sanitizeDifficulty(raw: unknown): number {
   return n;
 }
 
-async function assertCategoryExists(id: string): Promise<void> {
+async function assertCategoryExists(userId: string, id: string): Promise<void> {
   const rows = await db
     .select({ id: pomodoroCategories.id })
     .from(pomodoroCategories)
-    .where(eq(pomodoroCategories.id, id))
+    .where(
+      and(eq(pomodoroCategories.userId, userId), eq(pomodoroCategories.id, id)),
+    )
     .limit(1);
   if (rows.length === 0) throw new Error("Pomodoro category not found");
 }
@@ -109,6 +112,7 @@ export async function createHabit(input: {
   weekdayMask?: number;
   difficulty?: number;
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const name = sanitizeName(input.name);
   const emoji = sanitizeEmoji(input.emoji);
   const color = sanitizeColor(input.color ?? PRESET_COLORS[0]);
@@ -124,19 +128,17 @@ export async function createHabit(input: {
   }
   if (trackingKind === "pomodoro") {
     if (!pomoCategoryId) throw new Error("Pomodoro habits need a category");
-    await assertCategoryExists(pomoCategoryId);
+    await assertCategoryExists(user.id, pomoCategoryId);
     if (dailyTarget == null || dailyTarget <= 0) {
       throw new Error("Pomodoro habits need a positive daily target (sessions)");
     }
   }
-  if (trackingKind !== "number" && unit != null) {
-    // unit only meaningful for number kind — silently null-out instead of erroring
-  }
 
   const id = input.id ?? nanoid(12);
-  const position = await nextPosition();
+  const position = await nextPosition(user.id);
   await db.insert(habits).values({
     id,
+    userId: user.id,
     name,
     emoji,
     color,
@@ -153,8 +155,6 @@ export async function createHabit(input: {
   return { id };
 }
 
-
-
 export async function updateHabit(input: {
   id: string;
   name?: string;
@@ -168,6 +168,7 @@ export async function updateHabit(input: {
   difficulty?: number;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = sanitizeName(input.name);
   if (input.emoji !== undefined) patch.emoji = sanitizeEmoji(input.emoji);
@@ -180,7 +181,7 @@ export async function updateHabit(input: {
   }
   if (input.unit !== undefined) patch.unit = sanitizeUnit(input.unit);
   if (input.pomoCategoryId !== undefined) {
-    if (input.pomoCategoryId) await assertCategoryExists(input.pomoCategoryId);
+    if (input.pomoCategoryId) await assertCategoryExists(user.id, input.pomoCategoryId);
     patch.pomoCategoryId = input.pomoCategoryId;
   }
   if (input.weekdayMask !== undefined) {
@@ -190,17 +191,17 @@ export async function updateHabit(input: {
     patch.difficulty = sanitizeDifficulty(input.difficulty);
   }
   if (Object.keys(patch).length === 0) return;
-  await db.update(habits).set(patch).where(eq(habits.id, input.id));
+  await db
+    .update(habits)
+    .set(patch)
+    .where(and(eq(habits.id, input.id), eq(habits.userId, user.id)));
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
 }
 
-/**
- * Persist a new ordering for habits. Array index becomes the `position` value.
- * Validates each id is a non-empty unique string; orphaned ids no-op.
- */
 export async function reorderHabits(orderedIds: string[]): Promise<void> {
   if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  const { user } = await requireUser();
   const seen = new Set<string>();
   for (const id of orderedIds) {
     if (typeof id !== "string" || !id) throw new Error("invalid id in orderedIds");
@@ -209,7 +210,10 @@ export async function reorderHabits(orderedIds: string[]): Promise<void> {
   }
   await db.transaction(async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await tx.update(habits).set({ position: i }).where(eq(habits.id, orderedIds[i]));
+      await tx
+        .update(habits)
+        .set({ position: i })
+        .where(and(eq(habits.id, orderedIds[i]), eq(habits.userId, user.id)));
     }
   });
   revalidatePath("/habits", "layout");
@@ -217,45 +221,60 @@ export async function reorderHabits(orderedIds: string[]): Promise<void> {
 }
 
 export async function archiveHabit(id: string): Promise<void> {
+  const { user } = await requireUser();
   const now = new Date();
   await db.transaction(async (tx) => {
-    await tx.update(habits).set({ archivedAt: now }).where(eq(habits.id, id));
-    // Cascade: archive every active goal linked to this habit.
+    await tx
+      .update(habits)
+      .set({ archivedAt: now })
+      .where(and(eq(habits.id, id), eq(habits.userId, user.id)));
     await tx
       .update(goals)
       .set({ archivedAt: now, status: "archived" })
-      .where(and(eq(goals.habitId, id), isNull(goals.archivedAt)));
+      .where(
+        and(
+          eq(goals.userId, user.id),
+          eq(goals.habitId, id),
+          isNull(goals.archivedAt),
+        ),
+      );
   });
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
 }
 
 export async function unarchiveHabit(id: string): Promise<void> {
+  const { user } = await requireUser();
   await db.transaction(async (tx) => {
-    await tx.update(habits).set({ archivedAt: null }).where(eq(habits.id, id));
-    // Cascade: restore every archived goal linked to this habit.
+    await tx
+      .update(habits)
+      .set({ archivedAt: null })
+      .where(and(eq(habits.id, id), eq(habits.userId, user.id)));
     await tx
       .update(goals)
       .set({ archivedAt: null, status: "active" })
-      .where(and(eq(goals.habitId, id), isNotNull(goals.archivedAt)));
+      .where(
+        and(
+          eq(goals.userId, user.id),
+          eq(goals.habitId, id),
+          isNotNull(goals.archivedAt),
+        ),
+      );
   });
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
 }
 
-/**
- * Toggle a binary habit log for a date. Returns the new state (true if logged).
- * Errors if the habit is non-binary — use logHabitValue for number kind, and
- * for pomodoro kind the user runs the timer on /pomodoro instead.
- */
 export async function toggleHabitForDate(
   habitId: string,
   date: string,
 ): Promise<{ done: boolean }> {
   if (!habitId) throw new Error("habitId is required");
   if (!isValidDateString(date)) throw new Error(`Invalid date: ${date}`);
-  if (!(await isActiveHabit(habitId))) throw new Error("Habit not found or archived");
-  const habit = await findHabitById(habitId);
+  const { user } = await requireUser();
+  if (!(await isActiveHabit(user.id, habitId)))
+    throw new Error("Habit not found or archived");
+  const habit = await findHabitById(user.id, habitId);
   if (!habit) throw new Error("Habit not found");
   if (habit.trackingKind !== "binary") {
     throw new Error(`Habit '${habit.name}' is ${habit.trackingKind}-tracked — not togglable`);
@@ -264,27 +283,35 @@ export async function toggleHabitForDate(
   const existing = await db
     .select()
     .from(habitLogs)
-    .where(and(eq(habitLogs.habitId, habitId), eq(habitLogs.date, date)))
+    .where(
+      and(
+        eq(habitLogs.userId, user.id),
+        eq(habitLogs.habitId, habitId),
+        eq(habitLogs.date, date),
+      ),
+    )
     .limit(1);
 
   if (existing.length > 0) {
     await db
       .delete(habitLogs)
-      .where(and(eq(habitLogs.habitId, habitId), eq(habitLogs.date, date)));
+      .where(
+        and(
+          eq(habitLogs.userId, user.id),
+          eq(habitLogs.habitId, habitId),
+          eq(habitLogs.date, date),
+        ),
+      );
     revalidatePath("/habits", "layout");
     revalidatePath("/goals", "layout");
     return { done: false };
   }
-  await db.insert(habitLogs).values({ habitId, date });
+  await db.insert(habitLogs).values({ userId: user.id, habitId, date });
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
   return { done: true };
 }
 
-/**
- * Append a value-log row for a number-kind habit. Multiple rows per day are
- * allowed and summed on read; pass a negative delta to undo.
- */
 export async function logHabitValue(input: {
   id?: string;
   habitId: string;
@@ -294,7 +321,8 @@ export async function logHabitValue(input: {
   bookId?: string | null;
 }): Promise<{ id: string }> {
   if (!input.habitId) throw new Error("habitId is required");
-  const habit = await findHabitById(input.habitId);
+  const { user } = await requireUser();
+  const habit = await findHabitById(user.id, input.habitId);
   if (!habit) throw new Error("Habit not found");
   if (habit.trackingKind !== "number") {
     throw new Error(`Habit '${habit.name}' isn't a number-tracking habit`);
@@ -308,6 +336,7 @@ export async function logHabitValue(input: {
   const id = input.id ?? nanoid(12);
   await db.insert(habitValueLogs).values({
     id,
+    userId: user.id,
     habitId: input.habitId,
     date,
     value,
@@ -322,7 +351,12 @@ export async function logHabitValue(input: {
 
 export async function deleteHabitValueLog(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(habitValueLogs).where(eq(habitValueLogs.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(habitValueLogs)
+    .where(
+      and(eq(habitValueLogs.id, id), eq(habitValueLogs.userId, user.id)),
+    );
   revalidatePath("/habits", "layout");
   revalidatePath("/goals", "layout");
 }

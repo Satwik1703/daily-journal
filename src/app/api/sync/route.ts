@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DISPATCH } from "@/lib/sync/dispatch";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const session = await getCurrentUser();
+  if (!session) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
   let body: { kind?: string; args?: unknown };
   try {
     body = await req.json();

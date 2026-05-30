@@ -107,6 +107,7 @@ function KindCard({ date, kind, tasks }: { date: string; kind: TaskKind; tasks: 
     const id = nanoid(12);
     const newTask: JournalTask = {
       id,
+      userId: "",
       date,
       kind,
       text,

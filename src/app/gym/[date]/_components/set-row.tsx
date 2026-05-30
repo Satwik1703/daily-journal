@@ -8,7 +8,25 @@ import type { WorkoutSet } from "@/lib/gym-meta";
 
 const WEIGHT_STEP = 2.5;
 const REPS_STEP = 5;
+const REPS_LADDER: number[] = [0, 5, 8, 10, 12, 15, 20];
 const DEBOUNCE_MS = 800;
+
+function nextRepsLadder(current: number | null, delta: number): number | null {
+  if (delta === 0) return current;
+  if (current == null) {
+    return delta > 0 ? REPS_LADDER[0] : null;
+  }
+  if (delta > 0) {
+    for (const v of REPS_LADDER) {
+      if (v > current) return v;
+    }
+    return current;
+  }
+  for (let i = REPS_LADDER.length - 1; i >= 0; i--) {
+    if (REPS_LADDER[i] < current) return REPS_LADDER[i];
+  }
+  return current;
+}
 
 export function SetRow({
   set,
@@ -99,12 +117,7 @@ export function SetRow({
   }
   function stepReps(delta: number) {
     const current = set.reps;
-    let next: number | null;
-    if (current == null) {
-      next = delta > 0 ? Math.abs(delta) : null;
-    } else {
-      next = Math.max(0, current + delta);
-    }
+    const next = nextRepsLadder(current, delta);
     if (next === current) return;
     persist({ reps: next });
   }
@@ -123,6 +136,7 @@ export function SetRow({
         decimal
         step={WEIGHT_STEP}
         onStep={stepWeight}
+        onEdit={() => onDirty?.(set.id)}
         onCommit={(n) => {
           persist({ weightKg: n });
           flush();
@@ -137,6 +151,7 @@ export function SetRow({
         suffix="reps"
         step={REPS_STEP}
         onStep={stepReps}
+        onEdit={() => onDirty?.(set.id)}
         onCommit={(n) => {
           persist({ reps: n });
           flush();
@@ -172,6 +187,7 @@ function Stepper({
   step,
   onStep,
   onCommit,
+  onEdit,
   ariaLabel,
   accent = "default",
 }: {
@@ -181,29 +197,36 @@ function Stepper({
   step: number;
   onStep: (delta: number) => void;
   onCommit: (n: number | null) => void;
+  onEdit?: () => void;
   ariaLabel: string;
   accent?: "default" | "amber";
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>(value == null ? "" : String(value));
   const inputRef = useRef<HTMLInputElement>(null);
-
+  const valueRef = useRef(value);
   useEffect(() => {
-    if (editing) {
-      setDraft(value == null ? "" : String(value));
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      });
-    }
-  }, [editing, value]);
+    valueRef.current = value;
+  });
+
+  // Only seed draft + focus on the false→true transition. Crucially DO NOT
+  // depend on `value` here — a parent refetch landing mid-edit would
+  // otherwise overwrite the user's typed input.
+  useEffect(() => {
+    if (!editing) return;
+    setDraft(valueRef.current == null ? "" : String(valueRef.current));
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [editing]);
 
   function commit() {
     setEditing(false);
     const trimmed = draft.trim();
     if (trimmed === "") return onCommit(null);
     const n = decimal ? Number.parseFloat(trimmed) : Number.parseInt(trimmed, 10);
-    if (Number.isNaN(n)) return onCommit(value);
+    if (Number.isNaN(n)) return onCommit(valueRef.current);
     onCommit(Math.max(0, n));
   }
 
@@ -228,7 +251,10 @@ function Stepper({
       </StepBtn>
       <button
         type="button"
-        onClick={() => setEditing(true)}
+        onClick={() => {
+          if (!editing) onEdit?.();
+          setEditing(true);
+        }}
         aria-label={`Edit ${ariaLabel}`}
         className="flex min-w-[70px] flex-col items-center justify-center px-2 py-1 leading-none transition-colors hover:bg-muted"
       >
@@ -239,7 +265,10 @@ function Stepper({
             inputMode={decimal ? "decimal" : "numeric"}
             step={decimal ? "0.5" : "1"}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              onEdit?.();
+              setDraft(e.target.value);
+            }}
             onBlur={commit}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -248,7 +277,7 @@ function Stepper({
               }
               if (e.key === "Escape") {
                 setEditing(false);
-                setDraft(value == null ? "" : String(value));
+                setDraft(valueRef.current == null ? "" : String(valueRef.current));
               }
             }}
             className="w-full bg-transparent text-center text-sm tabular-nums focus:outline-none"

@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db/client";
-import { goals, goalProgress, goalChecklist, habits, journalTasks, journalEntries } from "@/db/schema";
+import { goals, goalProgress, goalChecklist, habits, journalTasks } from "@/db/schema";
 import { and, asc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
@@ -27,6 +27,7 @@ import {
   type GoalType,
   type PomoMetric,
 } from "@/lib/goal-meta";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_TITLE_LEN = 120;
 const MAX_EMOJI_LEN = 8;
@@ -122,8 +123,6 @@ function revalidateGoals() {
   revalidatePath("/goals", "layout");
 }
 
-// ---------- Goals CRUD ----------
-
 export async function createGoal(input: {
   id?: string;
   period: GoalPeriod;
@@ -139,19 +138,13 @@ export async function createGoal(input: {
   pomoMetric?: PomoMetric | null;
   parentId?: string | null;
   autoSplitChildren?: boolean;
-  /** Surfaces in the "Important" top section on /goals. Default false. */
   pinned?: boolean;
-  /**
-   * Reverse cascade (week → month → year). When set on a week-period goal,
-   * the form's standard single-row insert is skipped and we delegate to
-   * createReverseCascade() which inserts year + month parents + weekly
-   * clones for every week in the horizon.
-   */
   repeat?: {
     through: "endOfMonth" | "endOfYear";
-    monthKey?: string; // required when through === "endOfMonth"
+    monthKey?: string;
   };
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const period = assertPeriod(input.period);
   const periodKey = assertPeriodKey(input.periodKey, period);
   const title = sanitizeTitle(input.title);
@@ -171,7 +164,6 @@ export async function createGoal(input: {
     throw new Error("Pomodoro goals need a metric");
   }
 
-  // ---------- Reverse cascade branch ----------
   if (input.repeat) {
     if (period !== "week") {
       throw new Error("`repeat` only valid on week-period goals");
@@ -193,9 +185,10 @@ export async function createGoal(input: {
       }
       endRef = input.repeat.monthKey;
     } else {
-      endRef = periodKey.slice(0, 4); // year of the current week key
+      endRef = periodKey.slice(0, 4);
     }
     const { id: yearGoalId } = await createReverseCascade({
+      userId: user.id,
       currentWeekKey: periodKey,
       endKind: input.repeat.through,
       endRef,
@@ -214,9 +207,10 @@ export async function createGoal(input: {
   }
 
   const id = input.id ?? nanoid(12);
-  const position = await nextPositionFor(period, periodKey);
+  const position = await nextPositionFor(user.id, period, periodKey);
   await db.insert(goals).values({
     id,
+    userId: user.id,
     period,
     periodKey,
     parentId: input.parentId ?? null,
@@ -242,6 +236,7 @@ export async function createGoal(input: {
     targetValue > 0
   ) {
     await createCascadeChildren({
+      userId: user.id,
       parentId: id,
       parentPeriod: period,
       parentKey: periodKey,
@@ -261,12 +256,8 @@ export async function createGoal(input: {
   return { id };
 }
 
-/**
- * Yearly → 12 monthly children. Monthly → ~4 weekly children (ISO weeks
- * whose Thursday lies in the month). Skips past periods (only creates
- * current + future children when invoked mid-period).
- */
 async function createCascadeChildren(opts: {
+  userId: string;
   parentId: string;
   parentPeriod: "year" | "month";
   parentKey: string;
@@ -286,7 +277,6 @@ async function createCascadeChildren(opts: {
   const isReal = opts.unit === "min" || opts.unit === "minutes";
   const splits = autoSplitTargets(opts.targetValue, childKeys.length, isReal);
 
-  // Filter past — only create children for current or future periods.
   const future = childKeys
     .map((key, i) => ({ key, target: splits[i] }))
     .filter(({ key }) => {
@@ -295,9 +285,10 @@ async function createCascadeChildren(opts: {
     });
 
   for (const { key, target } of future) {
-    const position = await nextPositionFor(childPeriod, key);
+    const position = await nextPositionFor(opts.userId, childPeriod, key);
     await db.insert(goals).values({
       id: nanoid(12),
+      userId: opts.userId,
       period: childPeriod,
       periodKey: key,
       parentId: opts.parentId,
@@ -316,36 +307,17 @@ async function createCascadeChildren(opts: {
   }
 }
 
-/**
- * Reverse cascade: start at a weekly target and create
- *   - one yearly parent (only if endKind === "endOfYear")
- *   - N monthly parents (one per month spanned by the weeks)
- *   - one weekly clone per week in the horizon
- * Linked by parentId so the existing CascadeChildren rollup works as-is.
- *
- * Returns the topmost parent id (yearGoalId if any, else the first monthly
- * parent id) so the caller can revalidate / route off it.
- */
-/**
- * Load every (period, periodKey) currently held by an active goal that matches
- * the cascade-tree's identity (same habitId if linked, else same title) and
- * lives in or after `fromKey`. Used to skip duplicates inside both
- * createReverseCascade and extendReverseCascade so re-running them never
- * creates parallel hierarchies.
- */
 async function loadExistingCascadeKeys(opts: {
+  userId: string;
   title: string;
   habitId: string | null;
   pomoCategoryId: string | null;
   fromYear: string;
 }): Promise<{
   hasYearly: { id: string; periodKey: string } | null;
-  monthByKey: Map<string, string>; // monthKey -> goalId
+  monthByKey: Map<string, string>;
   weekKeys: Set<string>;
 }> {
-  // Heuristic identity: habit-linked goals match by habitId; everything else
-  // matches by exact title (case-sensitive). That mirrors how user re-creates
-  // the same cascade — they type the same title or pick the same habit.
   const matchClauses = opts.habitId
     ? eq(goals.habitId, opts.habitId)
     : eq(goals.title, opts.title);
@@ -355,9 +327,9 @@ async function loadExistingCascadeKeys(opts: {
     .from(goals)
     .where(
       and(
+        eq(goals.userId, opts.userId),
         matchClauses,
         isNull(goals.archivedAt),
-        // Limit to current year + later so unrelated past trees don't trip us.
       ),
     );
 
@@ -377,6 +349,7 @@ async function loadExistingCascadeKeys(opts: {
 }
 
 async function createReverseCascade(opts: {
+  userId: string;
   currentWeekKey: string;
   endKind: "endOfMonth" | "endOfYear";
   endRef: string;
@@ -393,11 +366,9 @@ async function createReverseCascade(opts: {
   const weekKeys = enumerateWeeksThrough(opts.currentWeekKey, opts.endKind, opts.endRef);
   if (weekKeys.length === 0) throw new Error("No weeks in horizon");
 
-  // De-dup pre-flight. If a yearly parent for the same identity already exists
-  // for this year, refuse — the user almost certainly didn't mean to start a
-  // second parallel hierarchy. They can use Extend instead.
   const yearOfCurrent = opts.currentWeekKey.slice(0, 4);
   const existing = await loadExistingCascadeKeys({
+    userId: opts.userId,
     title: opts.title,
     habitId: opts.habitId,
     pomoCategoryId: opts.pomoCategoryId,
@@ -413,9 +384,6 @@ async function createReverseCascade(opts: {
     );
   }
 
-  // Group weeks by their Thursday's month (ISO convention — matches
-  // createCascadeChildren's enumeration so the same week never lands in two
-  // different month buckets).
   const monthsToWeeks = new Map<string, string[]>();
   for (const wk of weekKeys) {
     const wkRange = periodRangeFor(wk, "week");
@@ -430,6 +398,7 @@ async function createReverseCascade(opts: {
   }
 
   const shared = {
+    userId: opts.userId,
     title: opts.title,
     emoji: opts.emoji,
     color: opts.color,
@@ -441,15 +410,13 @@ async function createReverseCascade(opts: {
     status: "active" as const,
   };
 
-  // Yearly: reuse an existing yearly row when present (e.g. extending after a
-  // prior endOfMonth call), otherwise create one.
   let yearGoalId: string | null = existing.hasYearly?.id ?? null;
   let yearCount = 0;
   if (opts.endKind === "endOfYear" && !yearGoalId) {
     const yearKey = opts.endRef;
     const yearTarget = opts.weeklyTarget * weekKeys.length;
     yearGoalId = nanoid(12);
-    const position = await nextPositionFor("year", yearKey);
+    const position = await nextPositionFor(opts.userId, "year", yearKey);
     await db.insert(goals).values({
       ...shared,
       id: yearGoalId,
@@ -462,8 +429,6 @@ async function createReverseCascade(opts: {
     yearCount = 1;
   }
 
-  // Monthly parents — one per month, target = sum of weeks in that month.
-  // Skip any month we've already created (de-dup map).
   const monthlyParentIdByMonth = new Map<string, string>();
   let monthCount = 0;
   for (const [monthKey, weeksInMonth] of monthsToWeeks) {
@@ -474,7 +439,7 @@ async function createReverseCascade(opts: {
     }
     const monthGoalId = nanoid(12);
     const monthTarget = opts.weeklyTarget * weeksInMonth.length;
-    const position = await nextPositionFor("month", monthKey);
+    const position = await nextPositionFor(opts.userId, "month", monthKey);
     await db.insert(goals).values({
       ...shared,
       id: monthGoalId,
@@ -488,14 +453,13 @@ async function createReverseCascade(opts: {
     monthCount++;
   }
 
-  // Weekly clones — link to their month. Skip weeks already represented.
   let weekCount = 0;
   for (const wk of weekKeys) {
     if (existing.weekKeys.has(wk)) continue;
     const wkRange = periodRangeFor(wk, "week");
     const monthKey = addDays(wkRange.start, 4).slice(0, 7);
     const parentId = monthlyParentIdByMonth.get(monthKey)!;
-    const position = await nextPositionFor("week", wk);
+    const position = await nextPositionFor(opts.userId, "week", wk);
     await db.insert(goals).values({
       ...shared,
       id: nanoid(12),
@@ -516,24 +480,18 @@ async function createReverseCascade(opts: {
   };
 }
 
-/**
- * Extend an existing reverse-cascade tree. Loads the tree's root, enumerates
- * the missing weeks through the new horizon, and inserts only the missing
- * rows (idempotent via loadExistingCascadeKeys). Reuses the same identity
- * heuristic as createReverseCascade.
- */
 export async function extendReverseCascade(input: {
   rootGoalId: string;
   through: "endOfMonth" | "endOfYear";
   monthKey?: string;
 }): Promise<{ addedWeeks: number; addedMonths: number }> {
-  const root = await findGoalById(input.rootGoalId);
+  const { user } = await requireUser();
+  const root = await findGoalById(user.id, input.rootGoalId);
   if (!root) throw new Error("root goal not found");
 
-  // Walk up to the topmost ancestor.
   let topmost = root;
   while (topmost.parentId) {
-    const next = await findGoalById(topmost.parentId);
+    const next = await findGoalById(user.id, topmost.parentId);
     if (!next) break;
     topmost = next;
   }
@@ -555,13 +513,12 @@ export async function extendReverseCascade(input: {
     endRef = currentWeekKey.slice(0, 4);
   }
 
-  // Read weeklyTarget by inspecting any existing weekly clone in the tree;
-  // fall back to topmost target / known weeks if none exists yet.
   const anyWeekly = await db
     .select()
     .from(goals)
     .where(
       and(
+        eq(goals.userId, user.id),
         topmost.habitId ? eq(goals.habitId, topmost.habitId) : eq(goals.title, topmost.title),
         eq(goals.period, "week"),
         isNull(goals.archivedAt),
@@ -569,11 +526,11 @@ export async function extendReverseCascade(input: {
     )
     .orderBy(asc(goals.periodKey))
     .limit(1);
-  const weeklyTarget =
-    anyWeekly[0]?.targetValue ?? topmost.targetValue ?? 0;
+  const weeklyTarget = anyWeekly[0]?.targetValue ?? topmost.targetValue ?? 0;
   if (weeklyTarget <= 0) throw new Error("Couldn't infer weekly target from tree");
 
   const before = await loadExistingCascadeKeys({
+    userId: user.id,
     title: topmost.title,
     habitId: topmost.habitId,
     pomoCategoryId: topmost.pomoCategoryId,
@@ -581,6 +538,7 @@ export async function extendReverseCascade(input: {
   });
 
   const { weekCount, monthCount } = await createReverseCascadeForExtend({
+    userId: user.id,
     currentWeekKey,
     endKind: input.through,
     endRef,
@@ -600,13 +558,8 @@ export async function extendReverseCascade(input: {
   return { addedWeeks: weekCount, addedMonths: monthCount };
 }
 
-/**
- * Internal-only variant of createReverseCascade that takes a precomputed
- * `existing` map instead of doing the throw-on-duplicate-yearly check. This
- * is what extendReverseCascade calls so re-running it after the tree already
- * exists doesn't error — it just fills the gaps.
- */
 async function createReverseCascadeForExtend(opts: {
+  userId: string;
   currentWeekKey: string;
   endKind: "endOfMonth" | "endOfYear";
   endRef: string;
@@ -638,6 +591,7 @@ async function createReverseCascadeForExtend(opts: {
   }
 
   const shared = {
+    userId: opts.userId,
     title: opts.title,
     emoji: opts.emoji,
     color: opts.color,
@@ -652,7 +606,7 @@ async function createReverseCascadeForExtend(opts: {
   let yearGoalId: string | null = opts.existing.hasYearly?.id ?? null;
   if (opts.endKind === "endOfYear" && !yearGoalId) {
     yearGoalId = nanoid(12);
-    const position = await nextPositionFor("year", opts.endRef);
+    const position = await nextPositionFor(opts.userId, "year", opts.endRef);
     await db.insert(goals).values({
       ...shared,
       id: yearGoalId,
@@ -673,7 +627,7 @@ async function createReverseCascadeForExtend(opts: {
       continue;
     }
     const monthGoalId = nanoid(12);
-    const position = await nextPositionFor("month", monthKey);
+    const position = await nextPositionFor(opts.userId, "month", monthKey);
     await db.insert(goals).values({
       ...shared,
       id: monthGoalId,
@@ -693,7 +647,7 @@ async function createReverseCascadeForExtend(opts: {
     const wkRange = periodRangeFor(wk, "week");
     const monthKey = addDays(wkRange.start, 4).slice(0, 7);
     const parentId = monthlyParentIdByMonth.get(monthKey)!;
-    const position = await nextPositionFor("week", wk);
+    const position = await nextPositionFor(opts.userId, "week", wk);
     await db.insert(goals).values({
       ...shared,
       id: nanoid(12),
@@ -716,17 +670,13 @@ function enumerateChildKeys(
   if (parentPeriod === "year") {
     return Array.from({ length: 12 }, (_, i) => `${parentKey}-${String(i + 1).padStart(2, "0")}`);
   }
-  // month → ISO weeks whose Thursday lies in this month
   const { start, end } = periodRangeFor(parentKey, "month");
   const seen = new Set<string>();
-  // Iterate every day in the month; pick unique ISO weeks whose Thursday
-  // falls within the month.
   let d = start;
   while (d <= end) {
     const wk = isoWeekKey(d);
     const wkRange = periodRangeFor(wk, "week");
-    // Thursday of this ISO week:
-    const thu = addDays(wkRange.start, 4); // Sun-start, +4 = Thursday
+    const thu = addDays(wkRange.start, 4);
     if (thu >= start && thu <= end) seen.add(wk);
     d = addDays(d, 1);
   }
@@ -743,6 +693,7 @@ export async function updateGoal(input: {
   pinned?: boolean;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = sanitizeTitle(input.title);
   if (input.emoji !== undefined) patch.emoji = sanitizeEmoji(input.emoji);
@@ -751,28 +702,29 @@ export async function updateGoal(input: {
   if (input.unit !== undefined) patch.unit = sanitizeUnit(input.unit);
   if (input.pinned !== undefined) patch.pinned = input.pinned === true;
   if (Object.keys(patch).length === 0) return;
-  await db.update(goals).set(patch).where(eq(goals.id, input.id));
+  await db
+    .update(goals)
+    .set(patch)
+    .where(and(eq(goals.id, input.id), eq(goals.userId, user.id)));
   revalidateGoals();
 }
-
-// ---------- Cross-level cascade edit + delete ----------
 
 type GoalRow = typeof goals.$inferSelect;
 type TreeNode = GoalRow & { children: TreeNode[] };
 
-async function findRoot(id: string): Promise<GoalRow | null> {
-  let current = await findGoalById(id);
+async function findRoot(userId: string, id: string): Promise<GoalRow | null> {
+  let current = await findGoalById(userId, id);
   if (!current) return null;
   while (current.parentId) {
-    const next = await findGoalById(current.parentId);
+    const next = await findGoalById(userId, current.parentId);
     if (!next) break;
     current = next;
   }
   return current;
 }
 
-async function loadTree(rootId: string): Promise<TreeNode | null> {
-  const root = await findGoalById(rootId);
+async function loadTree(userId: string, rootId: string): Promise<TreeNode | null> {
+  const root = await findGoalById(userId, rootId);
   if (!root) return null;
   const node: TreeNode = { ...root, children: [] };
   const queue: TreeNode[] = [node];
@@ -782,7 +734,10 @@ async function loadTree(rootId: string): Promise<TreeNode | null> {
     const kids =
       ids.length === 0
         ? []
-        : await db.select().from(goals).where(inArray(goals.parentId, ids));
+        : await db
+            .select()
+            .from(goals)
+            .where(and(eq(goals.userId, userId), inArray(goals.parentId, ids)));
     if (kids.length === 0) break;
     const byParent = new Map<string, TreeNode[]>();
     for (const k of kids) {
@@ -812,21 +767,6 @@ function flattenTree(n: TreeNode): TreeNode[] {
   return out;
 }
 
-/**
- * Edit a goal and propagate changes through the cascade tree to every
- * current/future instance. Past instances are frozen.
- *
- * Non-target fields (title/emoji/color/unit/habitId/pomoCategoryId/pomoMetric/pinned)
- * copy to every current/future node in the tree.
- *
- * Target changes pivot around the source goal's level:
- *  - Set every current/future node at the source's level to the new target.
- *  - Walk UP: ancestor target = sum of children targets (past untouched).
- *  - Walk DOWN: split parent target across current/future children via
- *    autoSplitTargets, subtracting past children's targets first.
- *
- * `type` is not editable post-creation (data model would diverge).
- */
 export async function updateGoalCascade(input: {
   id: string;
   title?: string;
@@ -840,18 +780,18 @@ export async function updateGoalCascade(input: {
   pinned?: boolean;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
-  const source = await findGoalById(input.id);
+  const { user } = await requireUser();
+  const source = await findGoalById(user.id, input.id);
   if (!source) throw new Error("Goal not found");
 
-  const root = await findRoot(source.id);
+  const root = await findRoot(user.id, source.id);
   if (!root) throw new Error("Goal root not found");
-  const tree = await loadTree(root.id);
+  const tree = await loadTree(user.id, root.id);
   if (!tree) throw new Error("Goal tree not found");
 
   const today = todayLocal();
   const all = flattenTree(tree);
 
-  // Sanitize non-target patch fields.
   const patchBase: Record<string, unknown> = {};
   if (input.title !== undefined) patchBase.title = sanitizeTitle(input.title);
   if (input.emoji !== undefined) patchBase.emoji = sanitizeEmoji(input.emoji);
@@ -865,18 +805,14 @@ export async function updateGoalCascade(input: {
   const newTargetProvided = input.targetValue !== undefined;
   const newTarget = newTargetProvided ? sanitizeTarget(input.targetValue) : null;
   const sourceLevel = source.period as GoalPeriod;
-  const isReal = (source.unit === "min" || source.unit === "minutes");
+  const isReal = source.unit === "min" || source.unit === "minutes";
 
   if (newTargetProvided) {
-    // Step 1: set source-level current/future nodes to newTarget.
     for (const n of all) {
       if (n.period === sourceLevel && isFutureOrCurrent(n, today)) {
         n.targetValue = newTarget;
       }
     }
-
-    // Step 2: recompute. Ancestors (above sourceLevel) post-order sum children;
-    // descendants (below sourceLevel) top-down split parent target.
     const recompute = (n: TreeNode): void => {
       if (n.period === sourceLevel) {
         redistribute(n);
@@ -906,10 +842,6 @@ export async function updateGoalCascade(input: {
     recompute(tree);
   }
 
-  // Persist: every current/future node gets patchBase. If target changed, also
-  // write recomputed targetValue (covers past ancestors whose target we DIDN'T
-  // change too — those still have their original value, so writing them is a
-  // no-op).
   await db.transaction(async (tx) => {
     for (const n of all) {
       const future = isFutureOrCurrent(n, today);
@@ -917,7 +849,10 @@ export async function updateGoalCascade(input: {
       if (future) Object.assign(updates, patchBase);
       if (newTargetProvided) updates.targetValue = n.targetValue;
       if (Object.keys(updates).length === 0) continue;
-      await tx.update(goals).set(updates).where(eq(goals.id, n.id));
+      await tx
+        .update(goals)
+        .set(updates)
+        .where(and(eq(goals.id, n.id), eq(goals.userId, user.id)));
     }
   });
 
@@ -926,25 +861,23 @@ export async function updateGoalCascade(input: {
   revalidatePath("/journal", "layout");
 }
 
-/**
- * Delete the cascade tree across the source's hierarchy. Only current + future
- * instances are removed; past instances stay so achievement history is intact.
- * Drizzle FK cascade handles goal_progress + goal_checklist.
- */
 export async function deleteGoalCascade(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  const source = await findGoalById(id);
+  const { user } = await requireUser();
+  const source = await findGoalById(user.id, id);
   if (!source) throw new Error("Goal not found");
-  const root = await findRoot(source.id);
+  const root = await findRoot(user.id, source.id);
   if (!root) throw new Error("Goal root not found");
-  const tree = await loadTree(root.id);
+  const tree = await loadTree(user.id, root.id);
   if (!tree) return;
   const today = todayLocal();
   const toDelete = flattenTree(tree)
     .filter((n) => isFutureOrCurrent(n, today))
     .map((n) => n.id);
   if (toDelete.length === 0) return;
-  await db.delete(goals).where(inArray(goals.id, toDelete));
+  await db
+    .delete(goals)
+    .where(and(eq(goals.userId, user.id), inArray(goals.id, toDelete)));
   revalidateGoals();
   revalidatePath("/habits", "layout");
   revalidatePath("/journal", "layout");
@@ -952,39 +885,55 @@ export async function deleteGoalCascade(id: string): Promise<void> {
 
 export async function setGoalPinned(input: { id: string; pinned: boolean }): Promise<void> {
   if (!input.id) throw new Error("id is required");
-  await db.update(goals).set({ pinned: input.pinned === true }).where(eq(goals.id, input.id));
+  const { user } = await requireUser();
+  await db
+    .update(goals)
+    .set({ pinned: input.pinned === true })
+    .where(and(eq(goals.id, input.id), eq(goals.userId, user.id)));
   revalidateGoals();
 }
 
 export async function deleteGoal(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(goals).where(eq(goals.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(goals)
+    .where(and(eq(goals.id, id), eq(goals.userId, user.id)));
   revalidateGoals();
 }
 
 export async function archiveGoal(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  const goal = await findGoalById(id);
+  const { user } = await requireUser();
+  const goal = await findGoalById(user.id, id);
   if (!goal) throw new Error("Goal not found");
   const now = new Date();
   await db.transaction(async (tx) => {
     await tx
       .update(goals)
       .set({ archivedAt: now, status: "archived" })
-      .where(eq(goals.id, id));
-    // Bi-directional: if habit-linked, archive the habit too (which will in
-    // turn cascade to any sibling goals via archiveHabit's own logic — but
-    // we're inside a transaction, so do the habit update directly here).
+      .where(and(eq(goals.id, id), eq(goals.userId, user.id)));
     if (goal.habitId) {
       await tx
         .update(habits)
         .set({ archivedAt: now })
-        .where(and(eq(habits.id, goal.habitId), isNull(habits.archivedAt)));
-      // Archive every other active goal linked to the same habit.
+        .where(
+          and(
+            eq(habits.userId, user.id),
+            eq(habits.id, goal.habitId),
+            isNull(habits.archivedAt),
+          ),
+        );
       await tx
         .update(goals)
         .set({ archivedAt: now, status: "archived" })
-        .where(and(eq(goals.habitId, goal.habitId), isNull(goals.archivedAt)));
+        .where(
+          and(
+            eq(goals.userId, user.id),
+            eq(goals.habitId, goal.habitId),
+            isNull(goals.archivedAt),
+          ),
+        );
     }
   });
   revalidateGoals();
@@ -993,30 +942,40 @@ export async function archiveGoal(id: string): Promise<void> {
 
 export async function unarchiveGoal(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  const goal = await findGoalById(id);
+  const { user } = await requireUser();
+  const goal = await findGoalById(user.id, id);
   if (!goal) throw new Error("Goal not found");
   await db.transaction(async (tx) => {
     await tx
       .update(goals)
       .set({ archivedAt: null, status: "active" })
-      .where(eq(goals.id, id));
+      .where(and(eq(goals.id, id), eq(goals.userId, user.id)));
     if (goal.habitId) {
       await tx
         .update(habits)
         .set({ archivedAt: null })
-        .where(and(eq(habits.id, goal.habitId), isNotNull(habits.archivedAt)));
-      // Restore every other archived goal linked to the same habit.
+        .where(
+          and(
+            eq(habits.userId, user.id),
+            eq(habits.id, goal.habitId),
+            isNotNull(habits.archivedAt),
+          ),
+        );
       await tx
         .update(goals)
         .set({ archivedAt: null, status: "active" })
-        .where(and(eq(goals.habitId, goal.habitId), isNotNull(goals.archivedAt)));
+        .where(
+          and(
+            eq(goals.userId, user.id),
+            eq(goals.habitId, goal.habitId),
+            isNotNull(goals.archivedAt),
+          ),
+        );
     }
   });
   revalidateGoals();
   revalidatePath("/habits", "layout");
 }
-
-// ---------- Number goal progress ----------
 
 export async function logProgress(input: {
   id?: string;
@@ -1026,7 +985,8 @@ export async function logProgress(input: {
   date?: string;
 }): Promise<{ id: string }> {
   if (!input.goalId) throw new Error("goalId is required");
-  const goal = await findGoalById(input.goalId);
+  const { user } = await requireUser();
+  const goal = await findGoalById(user.id, input.goalId);
   if (!goal) throw new Error("Goal not found");
   if (goal.type !== "number") throw new Error("Progress logging is only valid for number goals");
   const delta = typeof input.delta === "number" ? input.delta : Number(input.delta);
@@ -1036,6 +996,7 @@ export async function logProgress(input: {
   const id = input.id ?? nanoid(12);
   await db.insert(goalProgress).values({
     id,
+    userId: user.id,
     goalId: input.goalId,
     date,
     delta,
@@ -1047,11 +1008,12 @@ export async function logProgress(input: {
 
 export async function deleteProgress(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(goalProgress).where(eq(goalProgress.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(goalProgress)
+    .where(and(eq(goalProgress.id, id), eq(goalProgress.userId, user.id)));
   revalidateGoals();
 }
-
-// ---------- Milestone checklist ----------
 
 export async function addChecklistItem(input: {
   id?: string;
@@ -1059,17 +1021,25 @@ export async function addChecklistItem(input: {
   text: string;
 }): Promise<{ id: string }> {
   if (!input.goalId) throw new Error("goalId is required");
-  const goal = await findGoalById(input.goalId);
+  const { user } = await requireUser();
+  const goal = await findGoalById(user.id, input.goalId);
   if (!goal) throw new Error("Goal not found");
   if (goal.type !== "milestone") throw new Error("Checklist items only valid on milestone goals");
   const text = sanitizeChecklistText(input.text);
   const existing = await db
     .select({ position: goalChecklist.position })
     .from(goalChecklist)
-    .where(eq(goalChecklist.goalId, input.goalId));
+    .where(
+      and(
+        eq(goalChecklist.userId, user.id),
+        eq(goalChecklist.goalId, input.goalId),
+      ),
+    );
   const position = existing.length === 0 ? 0 : Math.max(...existing.map((r) => r.position)) + 1;
   const id = input.id ?? nanoid(12);
-  await db.insert(goalChecklist).values({ id, goalId: input.goalId, text, position });
+  await db
+    .insert(goalChecklist)
+    .values({ id, userId: user.id, goalId: input.goalId, text, position });
   revalidateGoals();
   return { id };
 }
@@ -1080,51 +1050,69 @@ export async function updateChecklistItem(input: {
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
   if (input.text === undefined) return;
+  const { user } = await requireUser();
   const text = sanitizeChecklistText(input.text);
-  await db.update(goalChecklist).set({ text }).where(eq(goalChecklist.id, input.id));
+  await db
+    .update(goalChecklist)
+    .set({ text })
+    .where(
+      and(eq(goalChecklist.id, input.id), eq(goalChecklist.userId, user.id)),
+    );
   revalidateGoals();
 }
 
 export async function toggleChecklistItem(itemId: string): Promise<{ done: boolean }> {
   if (!itemId) throw new Error("itemId is required");
+  const { user } = await requireUser();
   const rows = await db
     .select({ done: goalChecklist.done })
     .from(goalChecklist)
-    .where(eq(goalChecklist.id, itemId))
+    .where(
+      and(eq(goalChecklist.id, itemId), eq(goalChecklist.userId, user.id)),
+    )
     .limit(1);
   if (rows.length === 0) throw new Error("Checklist item not found");
   const next = !rows[0].done;
-  await db.update(goalChecklist).set({ done: next }).where(eq(goalChecklist.id, itemId));
+  await db
+    .update(goalChecklist)
+    .set({ done: next })
+    .where(
+      and(eq(goalChecklist.id, itemId), eq(goalChecklist.userId, user.id)),
+    );
   revalidateGoals();
   return { done: next };
 }
 
 export async function deleteChecklistItem(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(goalChecklist).where(eq(goalChecklist.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(goalChecklist)
+    .where(
+      and(eq(goalChecklist.id, id), eq(goalChecklist.userId, user.id)),
+    );
   revalidateGoals();
 }
 
-// ---------- Finalize + reflection (stub for Day C, public for completeness) ----------
-
-/**
- * Sets each active goal in (period, periodKey) to achieved/missed based on
- * derived progress. Idempotent — only touches rows with finalizedAt=null.
- * Day B keeps the signature for the action; the auto-trigger from
- * getGoalsForPeriod ships in Day C.
- */
 export async function finalizePeriod(input: {
   period: GoalPeriod;
   periodKey: string;
 }): Promise<{ finalized: number }> {
+  const { user } = await requireUser();
   const period = assertPeriod(input.period);
   const periodKey = assertPeriodKey(input.periodKey, period);
 
-  // Fetch active, non-archived goals in the period.
   const rows = await db
     .select()
     .from(goals)
-    .where(and(eq(goals.period, period), eq(goals.periodKey, periodKey), eq(goals.status, "active")));
+    .where(
+      and(
+        eq(goals.userId, user.id),
+        eq(goals.period, period),
+        eq(goals.periodKey, periodKey),
+        eq(goals.status, "active"),
+      ),
+    );
 
   let finalized = 0;
   for (const g of rows) {
@@ -1133,27 +1121,34 @@ export async function finalizePeriod(input: {
       const progressRows = await db
         .select({ delta: goalProgress.delta })
         .from(goalProgress)
-        .where(eq(goalProgress.goalId, g.id));
+        .where(
+          and(
+            eq(goalProgress.userId, user.id),
+            eq(goalProgress.goalId, g.id),
+          ),
+        );
       const current = progressRows.reduce((acc, r) => acc + (r.delta ?? 0), 0);
       achieved = g.targetValue != null && current >= g.targetValue;
     } else if (g.type === "milestone") {
       const items = await db
         .select({ done: goalChecklist.done })
         .from(goalChecklist)
-        .where(eq(goalChecklist.goalId, g.id))
+        .where(
+          and(
+            eq(goalChecklist.userId, user.id),
+            eq(goalChecklist.goalId, g.id),
+          ),
+        )
         .orderBy(asc(goalChecklist.position));
       const done = items.filter((i) => i.done).length;
-      // Single-step milestone (no checklist) → consider achieved only if
-      // explicitly marked via toggleMilestone (handled in Day C).
       achieved = items.length > 0 && done === items.length;
     } else {
-      // habit / pomodoro derivations land in Day C
       continue;
     }
     await db
       .update(goals)
       .set({ status: achieved ? "achieved" : "missed", finalizedAt: new Date() })
-      .where(eq(goals.id, g.id));
+      .where(and(eq(goals.id, g.id), eq(goals.userId, user.id)));
     finalized++;
   }
 
@@ -1168,6 +1163,7 @@ export async function saveReflection(input: {
   linkedDate?: string | null;
 }): Promise<void> {
   if (!input.goalId) throw new Error("goalId is required");
+  const { user } = await requireUser();
   const note = sanitizeNote(input.note);
   if (!note) throw new Error("note is required");
   const rating = Number(input.rating);
@@ -1177,7 +1173,7 @@ export async function saveReflection(input: {
   if (input.linkedDate && !isValidDateString(input.linkedDate)) {
     throw new Error(`Invalid linkedDate: ${input.linkedDate}`);
   }
-  const goal = await findGoalById(input.goalId);
+  const goal = await findGoalById(user.id, input.goalId);
   if (!goal) throw new Error("Goal not found");
 
   await db
@@ -1188,15 +1184,15 @@ export async function saveReflection(input: {
       reflectionLinkedDate: input.linkedDate ?? null,
       reflectionSavedAt: new Date(),
     })
-    .where(eq(goals.id, input.goalId));
+    .where(and(eq(goals.id, input.goalId), eq(goals.userId, user.id)));
 
-  // Optional: drop a `secondary` task into the journal entry for `linkedDate`.
   if (input.linkedDate) {
-    await ensureEntry(input.linkedDate);
-    const position = await nextTaskPosition(input.linkedDate, "secondary");
+    await ensureEntry(user.id, input.linkedDate);
+    const position = await nextTaskPosition(user.id, input.linkedDate, "secondary");
     const excerpt = note.length > 80 ? note.slice(0, 77) + "…" : note;
     await db.insert(journalTasks).values({
       id: nanoid(12),
+      userId: user.id,
       date: input.linkedDate,
       kind: "secondary",
       text: `Reflect: ${goal.title} — ${excerpt}`,
@@ -1208,3 +1204,5 @@ export async function saveReflection(input: {
 
   revalidateGoals();
 }
+
+void monthKeyOf;

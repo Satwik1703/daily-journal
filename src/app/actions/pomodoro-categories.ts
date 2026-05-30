@@ -2,11 +2,12 @@
 
 import { db } from "@/db/client";
 import { pomodoroCategories } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { nextCategoryPosition } from "@/db/queries/pomodoro-categories";
 import { PRESET_COLORS } from "@/lib/habit-meta";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_NAME_LEN = 80;
 const MAX_EMOJI_LEN = 8;
@@ -46,12 +47,15 @@ export async function createCategory(input: {
   emoji?: string | null;
   color?: string;
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const name = sanitizeName(input.name);
   const emoji = sanitizeEmoji(input.emoji);
   const color = sanitizeColor(input.color ?? PRESET_COLORS[0]);
   const id = input.id ?? nanoid(12);
-  const position = await nextCategoryPosition();
-  await db.insert(pomodoroCategories).values({ id, name, emoji, color, position });
+  const position = await nextCategoryPosition(user.id);
+  await db
+    .insert(pomodoroCategories)
+    .values({ id, userId: user.id, name, emoji, color, position });
   revalidatePomodoro();
   return { id };
 }
@@ -63,6 +67,7 @@ export async function updateCategory(input: {
   color?: string;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = sanitizeName(input.name);
   if (input.emoji !== undefined) patch.emoji = sanitizeEmoji(input.emoji);
@@ -71,32 +76,57 @@ export async function updateCategory(input: {
   await db
     .update(pomodoroCategories)
     .set(patch)
-    .where(eq(pomodoroCategories.id, input.id));
+    .where(
+      and(
+        eq(pomodoroCategories.id, input.id),
+        eq(pomodoroCategories.userId, user.id),
+      ),
+    );
   revalidatePomodoro();
 }
 
 export async function archiveCategory(id: string): Promise<void> {
+  const { user } = await requireUser();
   await db
     .update(pomodoroCategories)
     .set({ archivedAt: new Date() })
-    .where(eq(pomodoroCategories.id, id));
+    .where(
+      and(
+        eq(pomodoroCategories.id, id),
+        eq(pomodoroCategories.userId, user.id),
+      ),
+    );
   revalidatePomodoro();
 }
 
 export async function unarchiveCategory(id: string): Promise<void> {
+  const { user } = await requireUser();
   await db
     .update(pomodoroCategories)
     .set({ archivedAt: null })
-    .where(eq(pomodoroCategories.id, id));
+    .where(
+      and(
+        eq(pomodoroCategories.id, id),
+        eq(pomodoroCategories.userId, user.id),
+      ),
+    );
   revalidatePomodoro();
 }
 
 export async function reorderCategories(ids: string[]): Promise<void> {
-  for (let i = 0; i < ids.length; i++) {
-    await db
-      .update(pomodoroCategories)
-      .set({ position: i })
-      .where(eq(pomodoroCategories.id, ids[i]));
-  }
+  const { user } = await requireUser();
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < ids.length; i++) {
+      await tx
+        .update(pomodoroCategories)
+        .set({ position: i })
+        .where(
+          and(
+            eq(pomodoroCategories.id, ids[i]),
+            eq(pomodoroCategories.userId, user.id),
+          ),
+        );
+    }
+  });
   revalidatePomodoro();
 }

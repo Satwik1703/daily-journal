@@ -37,8 +37,6 @@ import {
   type GymRange,
 } from "@/lib/gym-meta";
 
-// ---------- Row-shape adapters (DB row -> client-safe plain object) ----------
-
 function rowSplit(r: typeof splits.$inferSelect): Split {
   return {
     id: r.id,
@@ -92,28 +90,44 @@ function rowSet(r: typeof workoutSets.$inferSelect): WorkoutSet {
   };
 }
 
-// ---------- Splits + exercises library ----------
-
-export async function getSplits(includeArchived = false): Promise<Split[]> {
+export async function getSplits(
+  userId: string,
+  includeArchived = false,
+): Promise<Split[]> {
   const rows = await db
     .select()
     .from(splits)
-    .where(includeArchived ? sql`1=1` : isNull(splits.archivedAt))
+    .where(
+      includeArchived
+        ? eq(splits.userId, userId)
+        : and(eq(splits.userId, userId), isNull(splits.archivedAt)),
+    )
     .orderBy(asc(splits.position));
   return rows.map(rowSplit);
 }
 
-export async function getExercises(includeArchived = false): Promise<Exercise[]> {
+export async function getExercises(
+  userId: string,
+  includeArchived = false,
+): Promise<Exercise[]> {
   const rows = await db
     .select()
     .from(exercises)
-    .where(includeArchived ? sql`1=1` : isNull(exercises.archivedAt))
+    .where(
+      includeArchived
+        ? eq(exercises.userId, userId)
+        : and(eq(exercises.userId, userId), isNull(exercises.archivedAt)),
+    )
     .orderBy(asc(exercises.position));
   return rows.map(rowExercise);
 }
 
-export async function getSplitExercises(): Promise<SplitExercise[]> {
-  const rows = await db.select().from(splitExercises).orderBy(asc(splitExercises.position));
+export async function getSplitExercises(userId: string): Promise<SplitExercise[]> {
+  const rows = await db
+    .select()
+    .from(splitExercises)
+    .where(eq(splitExercises.userId, userId))
+    .orderBy(asc(splitExercises.position));
   return rows.map((r) => ({
     splitId: r.splitId,
     exerciseId: r.exerciseId,
@@ -121,31 +135,32 @@ export async function getSplitExercises(): Promise<SplitExercise[]> {
   }));
 }
 
-export async function getAllSplitsWithExercises(): Promise<{
+export async function getAllSplitsWithExercises(userId: string): Promise<{
   splits: Split[];
   exercises: Exercise[];
   joins: SplitExercise[];
 }> {
   const [s, e, j] = await Promise.all([
-    getSplits(false),
-    getExercises(false),
-    getSplitExercises(),
+    getSplits(userId, false),
+    getExercises(userId, false),
+    getSplitExercises(userId),
   ]);
   return { splits: s, exercises: e, joins: j };
 }
-
-// ---------- Workout for date ----------
 
 export type WorkoutForDate = {
   workout: Workout | null;
   sets: WorkoutSet[];
 };
 
-export async function getWorkoutForDate(date: DateString): Promise<WorkoutForDate> {
+export async function getWorkoutForDate(
+  userId: string,
+  date: DateString,
+): Promise<WorkoutForDate> {
   const wRows = await db
     .select()
     .from(workouts)
-    .where(eq(workouts.date, date))
+    .where(and(eq(workouts.userId, userId), eq(workouts.date, date)))
     .orderBy(desc(workouts.createdAt))
     .limit(1);
   if (wRows.length === 0) return { workout: null, sets: [] };
@@ -153,14 +168,15 @@ export async function getWorkoutForDate(date: DateString): Promise<WorkoutForDat
   const setRows = await db
     .select()
     .from(workoutSets)
-    .where(eq(workoutSets.workoutId, workout.id))
+    .where(
+      and(eq(workoutSets.userId, userId), eq(workoutSets.workoutId, workout.id)),
+    )
     .orderBy(asc(workoutSets.createdAt));
   return { workout, sets: setRows.map(rowSet) };
 }
 
-// ---------- Smart prefill (last set per exercise before a date) ----------
-
 export async function getLastSetPerExerciseBefore(
+  userId: string,
   beforeDate: DateString,
   exerciseIds: string[],
 ): Promise<Record<string, { reps: number | null; weightKg: number | null }>> {
@@ -168,7 +184,7 @@ export async function getLastSetPerExerciseBefore(
   const wRows = await db
     .select({ id: workouts.id, date: workouts.date })
     .from(workouts)
-    .where(sql`${workouts.date} < ${beforeDate}`)
+    .where(and(eq(workouts.userId, userId), sql`${workouts.date} < ${beforeDate}`))
     .orderBy(desc(workouts.date), desc(workouts.createdAt));
   if (wRows.length === 0) return {};
   const wIdToDate = new Map(wRows.map((r) => [r.id, r.date]));
@@ -178,6 +194,7 @@ export async function getLastSetPerExerciseBefore(
     .from(workoutSets)
     .where(
       and(
+        eq(workoutSets.userId, userId),
         inArray(workoutSets.exerciseId, exerciseIds),
         inArray(workoutSets.workoutId, wIds),
       ),
@@ -198,13 +215,8 @@ export async function getLastSetPerExerciseBefore(
   return out;
 }
 
-// ---------- Last session per exercise (for progression suggestion) ----------
-
-/**
- * Per exercise: the most recent workout where the exercise had sets, and all
- * the sets from that single workout. Empty entry if never logged.
- */
 export async function getLastSessionSetsPerExercise(
+  userId: string,
   beforeDate: DateString,
   exerciseIds: string[],
 ): Promise<
@@ -214,7 +226,7 @@ export async function getLastSessionSetsPerExercise(
   const wRows = await db
     .select({ id: workouts.id, date: workouts.date })
     .from(workouts)
-    .where(sql`${workouts.date} < ${beforeDate}`)
+    .where(and(eq(workouts.userId, userId), sql`${workouts.date} < ${beforeDate}`))
     .orderBy(desc(workouts.date), desc(workouts.createdAt));
   if (wRows.length === 0) return {};
 
@@ -229,18 +241,16 @@ export async function getLastSessionSetsPerExercise(
     .from(workoutSets)
     .where(
       and(
+        eq(workoutSets.userId, userId),
         inArray(workoutSets.exerciseId, exerciseIds),
         inArray(workoutSets.workoutId, wRows.map((r) => r.id)),
       ),
     );
 
-  // For each exercise pick the most recent date that had sets, take all sets
-  // from that date (could be multiple workouts on same date — combine).
   const byExercise = new Map<
     string,
     { date: DateString; sets: { reps: number | null; weightKg: number | null }[] }
   >();
-  // Group: exerciseId -> date -> sets[]
   const buckets = new Map<string, Map<DateString, { reps: number | null; weightKg: number | null }[]>>();
   for (const s of setRows) {
     const d = wIdToDate.get(s.workoutId);
@@ -268,18 +278,15 @@ export async function getLastSessionSetsPerExercise(
   return out;
 }
 
-// ---------- All workouts for streak / suggestion (lightweight) ----------
-
-export async function getAllWorkoutsLight(): Promise<
-  { date: DateString; splitId: string | null }[]
-> {
+export async function getAllWorkoutsLight(
+  userId: string,
+): Promise<{ date: DateString; splitId: string | null }[]> {
   return db
     .select({ date: workouts.date, splitId: workouts.splitId })
     .from(workouts)
+    .where(eq(workouts.userId, userId))
     .orderBy(asc(workouts.date));
 }
-
-// ---------- Compare this week vs last ----------
 
 export type WeekAgg = {
   weekKey: string;
@@ -293,6 +300,7 @@ export type WeekAgg = {
 };
 
 async function aggregateWeek(
+  userId: string,
   weekKey: string,
   exercisesById: Map<string, Exercise>,
 ): Promise<WeekAgg> {
@@ -300,7 +308,7 @@ async function aggregateWeek(
   const wRows = await db
     .select()
     .from(workouts)
-    .where(between(workouts.date, start, end));
+    .where(and(eq(workouts.userId, userId), between(workouts.date, start, end)));
   const workoutCount = wRows.length;
   let totalVolume = 0;
   let totalSets = 0;
@@ -311,7 +319,12 @@ async function aggregateWeek(
     const setRows = await db
       .select()
       .from(workoutSets)
-      .where(inArray(workoutSets.workoutId, wRows.map((r) => r.id)));
+      .where(
+        and(
+          eq(workoutSets.userId, userId),
+          inArray(workoutSets.workoutId, wRows.map((r) => r.id)),
+        ),
+      );
     for (const s of setRows.map(rowSet)) {
       totalSets += 1;
       totalVolume += setVolume(s);
@@ -352,25 +365,27 @@ async function aggregateWeek(
   };
 }
 
-export async function getGymWeekCompare(): Promise<{ thisWeek: WeekAgg; lastWeek: WeekAgg }> {
+export async function getGymWeekCompare(
+  userId: string,
+): Promise<{ thisWeek: WeekAgg; lastWeek: WeekAgg }> {
   const today = todayLocal();
   const thisKey = isoWeekKey(today);
-  // Step back one week: use periodRangeFor previous week.
   const thisStart = periodRangeFor(thisKey, "week").start;
-  const lastWeekDate = addDays(thisStart, -3); // any date inside last week
+  const lastWeekDate = addDays(thisStart, -3);
   const lastKey = isoWeekKey(lastWeekDate);
 
-  const exRows = await db.select().from(exercises);
+  const exRows = await db
+    .select()
+    .from(exercises)
+    .where(eq(exercises.userId, userId));
   const exById = new Map(exRows.map((r) => [r.id, rowExercise(r)]));
 
   const [thisWeek, lastWeek] = await Promise.all([
-    aggregateWeek(thisKey, exById),
-    aggregateWeek(lastKey, exById),
+    aggregateWeek(userId, thisKey, exById),
+    aggregateWeek(userId, lastKey, exById),
   ]);
   return { thisWeek, lastWeek };
 }
-
-// ---------- Split week streaks (computed against ALL workouts) ----------
 
 export type SplitStreakEntry = {
   splitId: string;
@@ -381,8 +396,6 @@ export type SplitStreakEntry = {
   longest: number;
 };
 
-// ---------- Month status for date stepper ----------
-
 export type GymDayStat = {
   hadWorkout: boolean;
   splitId: string | null;
@@ -390,18 +403,15 @@ export type GymDayStat = {
   setCount: number;
 };
 
-/**
- * Per-date stats for the window. Volume = SUM(reps × weight) across all sets
- * logged on that date. setCount = total number of sets logged.
- */
 export async function getGymMonthStatus(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<Record<string, GymDayStat>> {
   const wRows = await db
     .select({ id: workouts.id, date: workouts.date, splitId: workouts.splitId })
     .from(workouts)
-    .where(between(workouts.date, start, end));
+    .where(and(eq(workouts.userId, userId), between(workouts.date, start, end)));
   if (wRows.length === 0) return {};
 
   const wIdToDate = new Map(wRows.map((r) => [r.id, r.date]));
@@ -417,7 +427,12 @@ export async function getGymMonthStatus(
       weightKg: workoutSets.weightKg,
     })
     .from(workoutSets)
-    .where(inArray(workoutSets.workoutId, wRows.map((r) => r.id)));
+    .where(
+      and(
+        eq(workoutSets.userId, userId),
+        inArray(workoutSets.workoutId, wRows.map((r) => r.id)),
+      ),
+    );
   for (const s of setRows) {
     const d = wIdToDate.get(s.workoutId);
     if (!d) continue;
@@ -428,23 +443,18 @@ export async function getGymMonthStatus(
   return out;
 }
 
-/**
- * Max single-day volume in trailing window. Used as the calendar's
- * normalization reference so coloring stays stable.
- */
 export async function getMaxDailyVolumeInRange(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<number> {
-  const stats = await getGymMonthStatus(start, end);
+  const stats = await getGymMonthStatus(userId, start, end);
   let m = 0;
   for (const v of Object.values(stats)) {
     if (v.volume > m) m = v.volume;
   }
   return m;
 }
-
-// ---------- Insights window ----------
 
 export type GymInsightsWindow = {
   range: GymRange;
@@ -471,14 +481,29 @@ export type GymInsightsWindow = {
   hoursSinceLastHitByMuscle: Partial<Record<MuscleGroup, number | null>>;
 };
 
-export async function getGymInsightsWindow(range: GymRange): Promise<GymInsightsWindow> {
+export async function getGymInsightsWindow(
+  userId: string,
+  range: GymRange,
+): Promise<GymInsightsWindow> {
   const end = todayLocal();
   const start = addDays(end, -(range - 1));
 
   const [wRows, sRows, exRows, joinRows] = await Promise.all([
-    db.select().from(workouts).where(between(workouts.date, start, end)).orderBy(asc(workouts.date)),
-    db.select().from(splits).where(isNull(splits.archivedAt)).orderBy(asc(splits.position)),
-    db.select().from(exercises).where(isNull(exercises.archivedAt)).orderBy(asc(exercises.position)),
+    db
+      .select()
+      .from(workouts)
+      .where(and(eq(workouts.userId, userId), between(workouts.date, start, end)))
+      .orderBy(asc(workouts.date)),
+    db
+      .select()
+      .from(splits)
+      .where(and(eq(splits.userId, userId), isNull(splits.archivedAt)))
+      .orderBy(asc(splits.position)),
+    db
+      .select()
+      .from(exercises)
+      .where(and(eq(exercises.userId, userId), isNull(exercises.archivedAt)))
+      .orderBy(asc(exercises.position)),
     Promise.resolve([] as SplitExercise[]),
   ]);
 
@@ -492,11 +517,15 @@ export async function getGymInsightsWindow(range: GymRange): Promise<GymInsights
     const setRows = await db
       .select()
       .from(workoutSets)
-      .where(inArray(workoutSets.workoutId, workoutsInRange.map((w) => w.id)));
+      .where(
+        and(
+          eq(workoutSets.userId, userId),
+          inArray(workoutSets.workoutId, workoutsInRange.map((w) => w.id)),
+        ),
+      );
     setsInRange = setRows.map(rowSet);
   }
 
-  // Per-muscle aggregations
   const exById = new Map(exercisesList.map((e) => [e.id, e]));
   const volumePerMuscle: Partial<Record<MuscleGroup, number>> = {};
   const setsPerMuscle: Partial<Record<MuscleGroup, number>> = {};
@@ -510,20 +539,17 @@ export async function getGymInsightsWindow(range: GymRange): Promise<GymInsights
     }
   }
 
-  // Workouts per day
   const workoutsPerDay: Record<string, number> = {};
   for (const w of workoutsInRange) {
     workoutsPerDay[w.date] = (workoutsPerDay[w.date] ?? 0) + 1;
   }
 
-  // Split frequency
   const splitFrequency: Record<string, number> = {};
   for (const w of workoutsInRange) {
     const key = w.splitId ?? "__free__";
     splitFrequency[key] = (splitFrequency[key] ?? 0) + 1;
   }
 
-  // Top exercises by volume
   const exVolume = new Map<string, { volume: number; sets: number; name: string }>();
   for (const s of setsInRange) {
     const ex = exById.get(s.exerciseId);
@@ -538,25 +564,30 @@ export async function getGymInsightsWindow(range: GymRange): Promise<GymInsights
     .sort((a, b) => b.volume - a.volume)
     .slice(0, 8);
 
-  // Personal records (all-time, but only flag PRs achieved within window).
-  // For each exercise touched in window, compute max weight + max 1RM across all history,
-  // then find sets within window that match either max.
   const exerciseIdsInWindow = Array.from(new Set(setsInRange.map((s) => s.exerciseId)));
   const personalRecords: GymInsightsWindow["personalRecords"] = [];
   if (exerciseIdsInWindow.length > 0) {
     const allSetsRows = await db
       .select()
       .from(workoutSets)
-      .where(inArray(workoutSets.exerciseId, exerciseIdsInWindow));
+      .where(
+        and(
+          eq(workoutSets.userId, userId),
+          inArray(workoutSets.exerciseId, exerciseIdsInWindow),
+        ),
+      );
     const wDateById = new Map(
       (
         await db
           .select({ id: workouts.id, date: workouts.date })
           .from(workouts)
           .where(
-            inArray(
-              workouts.id,
-              Array.from(new Set(allSetsRows.map((s) => s.workoutId))),
+            and(
+              eq(workouts.userId, userId),
+              inArray(
+                workouts.id,
+                Array.from(new Set(allSetsRows.map((s) => s.workoutId))),
+              ),
             ),
           )
       ).map((r) => [r.id, r.date]),
@@ -606,12 +637,11 @@ export async function getGymInsightsWindow(range: GymRange): Promise<GymInsights
     personalRecords.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
   }
 
-  // Hours since last hit per muscle (for recovery mode) — searches LAST 14 days only.
   const recoveryStart = addDays(end, -13);
   const recentWRows = await db
     .select()
     .from(workouts)
-    .where(gte(workouts.date, recoveryStart))
+    .where(and(eq(workouts.userId, userId), gte(workouts.date, recoveryStart)))
     .orderBy(desc(workouts.date), desc(workouts.createdAt));
   const recentWorkouts = recentWRows.map(rowWorkout);
   const hoursSinceLastHitByMuscle: Partial<Record<MuscleGroup, number | null>> = {};
@@ -619,7 +649,12 @@ export async function getGymInsightsWindow(range: GymRange): Promise<GymInsights
     const recentSetRows = await db
       .select()
       .from(workoutSets)
-      .where(inArray(workoutSets.workoutId, recentWorkouts.map((w) => w.id)));
+      .where(
+        and(
+          eq(workoutSets.userId, userId),
+          inArray(workoutSets.workoutId, recentWorkouts.map((w) => w.id)),
+        ),
+      );
     const wMostRecentTs = new Map<string, number>();
     for (const w of recentWorkouts) {
       wMostRecentTs.set(w.id, w.createdAt);

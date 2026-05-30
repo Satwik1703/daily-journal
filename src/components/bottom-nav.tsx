@@ -50,6 +50,7 @@ function useQueueCount(): number {
 export function BottomNav() {
   const pathname = usePathname();
   const pendingCount = useQueueCount();
+  if (pathname.startsWith("/auth")) return null;
   return (
     <nav
       className={cn(

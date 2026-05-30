@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { journalEntries } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { isValidDateString } from "@/lib/dates";
+import { requireUser } from "@/lib/auth/context";
 
 export type JournalPatch = {
   date: string;
@@ -19,7 +20,6 @@ export type JournalPatch = {
   mood?: number | null;
   sleepQuality?: number | null;
   tomorrowPlan?: string | null;
-  /** Full replacement for the answers JSON map (caller sends the merged result). */
   answers?: Record<string, unknown> | null;
 };
 
@@ -31,10 +31,13 @@ function clean<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out as Partial<T>;
 }
 
-export async function saveJournalEntry(patch: JournalPatch): Promise<{ ok: true; updatedAt: number }> {
+export async function saveJournalEntry(
+  patch: JournalPatch,
+): Promise<{ ok: true; updatedAt: number }> {
   if (!isValidDateString(patch.date)) {
     throw new Error(`Invalid date: ${patch.date}`);
   }
+  const { user } = await requireUser();
 
   const { date, ...rest } = patch;
   const fields = clean(rest);
@@ -42,12 +45,13 @@ export async function saveJournalEntry(patch: JournalPatch): Promise<{ ok: true;
   await db
     .insert(journalEntries)
     .values({
+      userId: user.id,
       date,
       ...fields,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: journalEntries.date,
+      target: [journalEntries.userId, journalEntries.date],
       set: {
         ...fields,
         updatedAt: sql`(unixepoch())`,

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { journalEntries } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { isValidDateString } from "@/lib/dates";
 import { getActiveQuestions } from "@/db/queries/journal-questions";
 import { getTasksForDate } from "@/db/queries/journal-tasks";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +17,22 @@ export async function GET(
   if (!isValidDateString(date)) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
+  const session = await getCurrentUser();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = session.user.id;
 
   const [rows, questions, tasks] = await Promise.all([
-    db.select().from(journalEntries).where(eq(journalEntries.date, date)).limit(1),
-    getActiveQuestions(),
-    getTasksForDate(date),
+    db
+      .select()
+      .from(journalEntries)
+      .where(
+        and(eq(journalEntries.userId, userId), eq(journalEntries.date, date)),
+      )
+      .limit(1),
+    getActiveQuestions(userId),
+    getTasksForDate(userId, date),
   ]);
   const entry = rows[0] ?? null;
 

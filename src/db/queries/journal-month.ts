@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { journalEntries, journalTasks } from "@/db/schema";
-import { and, between, gte, lte } from "drizzle-orm";
+import { and, between, eq, gte, lte } from "drizzle-orm";
 import { computeJournalStatus, type JournalStatus } from "@/lib/journal-status";
 import type { DateString } from "@/lib/dates";
 
@@ -22,6 +22,7 @@ function emptyAgg(): TaskAgg {
  * them as "empty").
  */
 export async function getJournalMonthStatus(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<Record<DateString, JournalStatus>> {
@@ -29,7 +30,13 @@ export async function getJournalMonthStatus(
     db
       .select({ date: journalEntries.date })
       .from(journalEntries)
-      .where(and(gte(journalEntries.date, start), lte(journalEntries.date, end))),
+      .where(
+        and(
+          eq(journalEntries.userId, userId),
+          gte(journalEntries.date, start),
+          lte(journalEntries.date, end),
+        ),
+      ),
     db
       .select({
         date: journalTasks.date,
@@ -37,7 +44,12 @@ export async function getJournalMonthStatus(
         done: journalTasks.done,
       })
       .from(journalTasks)
-      .where(between(journalTasks.date, start, end)),
+      .where(
+        and(
+          eq(journalTasks.userId, userId),
+          between(journalTasks.date, start, end),
+        ),
+      ),
   ]);
 
   const hasEntryByDate = new Set<DateString>(entryRows.map((r) => r.date));

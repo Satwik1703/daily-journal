@@ -2,11 +2,12 @@
 
 import { db } from "@/db/client";
 import { books, settings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { isValidDateString } from "@/lib/dates";
 import { findBookById, nextBookPosition } from "@/db/queries/books";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_TITLE_LEN = 200;
 const MAX_AUTHOR_LEN = 120;
@@ -89,10 +90,12 @@ export async function createBook(input: {
   status?: string;
   color?: string;
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const id = input.id ?? nanoid(12);
-  const position = await nextBookPosition();
+  const position = await nextBookPosition(user.id);
   await db.insert(books).values({
     id,
+    userId: user.id,
     title: sanitizeTitle(input.title),
     author: sanitizeAuthor(input.author),
     totalPages: sanitizePages(input.totalPages),
@@ -122,6 +125,7 @@ export async function updateBook(input: {
   color?: string;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = sanitizeTitle(input.title);
   if (input.author !== undefined) patch.author = sanitizeAuthor(input.author);
@@ -133,23 +137,33 @@ export async function updateBook(input: {
   if (input.status !== undefined) patch.status = sanitizeStatus(input.status);
   if (input.color !== undefined) patch.color = sanitizeColor(input.color);
   if (Object.keys(patch).length === 0) return;
-  await db.update(books).set(patch).where(eq(books.id, input.id));
+  await db
+    .update(books)
+    .set(patch)
+    .where(and(eq(books.id, input.id), eq(books.userId, user.id)));
   revalidatePath("/books");
   revalidatePath("/habits", "layout");
 }
 
 export async function deleteBook(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(books).where(eq(books.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(books)
+    .where(and(eq(books.id, id), eq(books.userId, user.id)));
   revalidatePath("/books");
   revalidatePath("/habits", "layout");
 }
 
 export async function reorderBooks(orderedIds: string[]): Promise<void> {
   if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  const { user } = await requireUser();
   await db.transaction(async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await tx.update(books).set({ position: i }).where(eq(books.id, orderedIds[i]));
+      await tx
+        .update(books)
+        .set({ position: i })
+        .where(and(eq(books.id, orderedIds[i]), eq(books.userId, user.id)));
     }
   });
   revalidatePath("/books");
@@ -158,15 +172,16 @@ export async function reorderBooks(orderedIds: string[]): Promise<void> {
 const ACTIVE_BOOK_KEY = "active_book_id";
 
 export async function setActiveBook(bookId: string | null): Promise<void> {
+  const { user } = await requireUser();
   if (bookId) {
-    const exists = await findBookById(bookId);
+    const exists = await findBookById(user.id, bookId);
     if (!exists) throw new Error("book not found");
   }
   await db
     .insert(settings)
-    .values({ key: ACTIVE_BOOK_KEY, value: bookId })
+    .values({ userId: user.id, key: ACTIVE_BOOK_KEY, value: bookId })
     .onConflictDoUpdate({
-      target: settings.key,
+      target: [settings.userId, settings.key],
       set: { value: bookId },
     });
   revalidatePath("/books");

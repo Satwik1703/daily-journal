@@ -36,7 +36,10 @@ export type PomodoroDay = {
   byCategory: DayCategoryAgg[];
 };
 
-export async function getPomodoroDay(date: DateString): Promise<PomodoroDay> {
+export async function getPomodoroDay(
+  userId: string,
+  date: DateString,
+): Promise<PomodoroDay> {
   const rows = await db
     .select({
       session: pomodoroSessions,
@@ -49,7 +52,9 @@ export async function getPomodoroDay(date: DateString): Promise<PomodoroDay> {
       pomodoroCategories,
       eq(pomodoroSessions.categoryId, pomodoroCategories.id),
     )
-    .where(eq(pomodoroSessions.date, date))
+    .where(
+      and(eq(pomodoroSessions.userId, userId), eq(pomodoroSessions.date, date)),
+    )
     .orderBy(asc(pomodoroSessions.startedAt));
 
   const sessions = rows.map((r) => ({
@@ -121,7 +126,10 @@ export type PomodoroWindow = {
   activeDates: Set<DateString>;
 };
 
-export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWindow> {
+export async function getPomodoroWindow(
+  userId: string,
+  rangeDays: number,
+): Promise<PomodoroWindow> {
   const end = todayLocal();
   const start = addDays(end, -(rangeDays - 1));
 
@@ -137,7 +145,12 @@ export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWind
       pomodoroCategories,
       eq(pomodoroSessions.categoryId, pomodoroCategories.id),
     )
-    .where(between(pomodoroSessions.date, start, end))
+    .where(
+      and(
+        eq(pomodoroSessions.userId, userId),
+        between(pomodoroSessions.date, start, end),
+      ),
+    )
     .orderBy(asc(pomodoroSessions.date), asc(pomodoroSessions.startedAt));
 
   const dailyMap = new Map<DateString, PomodoroDailyRow>();
@@ -231,6 +244,7 @@ export async function getPomodoroWindow(rangeDays: number): Promise<PomodoroWind
 }
 
 export async function getPomodoroMonthStatus(
+  userId: string,
   start: DateString,
   end: DateString,
 ): Promise<Record<DateString, JournalStatus>> {
@@ -241,7 +255,11 @@ export async function getPomodoroMonthStatus(
     })
     .from(pomodoroSessions)
     .where(
-      and(gte(pomodoroSessions.date, start), lte(pomodoroSessions.date, end)),
+      and(
+        eq(pomodoroSessions.userId, userId),
+        gte(pomodoroSessions.date, start),
+        lte(pomodoroSessions.date, end),
+      ),
     );
 
   const perDate = new Map<DateString, { pomos: number; any: boolean }>();
@@ -259,10 +277,11 @@ export async function getPomodoroMonthStatus(
 }
 
 /** Distinct dates (sorted ASC) that have at least one session. Used for streak math. */
-export async function getAllSessionDates(): Promise<DateString[]> {
+export async function getAllSessionDates(userId: string): Promise<DateString[]> {
   const rows = await db
     .select({ date: pomodoroSessions.date })
-    .from(pomodoroSessions);
+    .from(pomodoroSessions)
+    .where(eq(pomodoroSessions.userId, userId));
   const set = new Set<DateString>();
   for (const r of rows) set.add(r.date);
   return Array.from(set).sort();

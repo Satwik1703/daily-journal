@@ -11,20 +11,28 @@ import {
 
 // ---------- Journal ----------
 
-export const journalQuestions = sqliteTable("journal_questions", {
-  id: text("id").primaryKey(),
-  label: text("label").notNull(),
-  type: text("type", { enum: ["text", "scale", "boolean"] }).notNull(),
-  position: integer("position").notNull().default(0),
-  archivedAt: integer("archived_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const journalQuestions = sqliteTable(
+  "journal_questions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    label: text("label").notNull(),
+    type: text("type", { enum: ["text", "scale", "boolean"] }).notNull(),
+    position: integer("position").notNull().default(0),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("journal_questions_user").on(t.userId)],
+);
 
-export const journalEntries = sqliteTable("journal_entries", {
-  // YYYY-MM-DD in local time. Lexicographic sort = chronological.
-  date: text("date").primaryKey(),
+export const journalEntries = sqliteTable(
+  "journal_entries",
+  {
+    userId: text("user_id").notNull(),
+    // YYYY-MM-DD in local time. Lexicographic sort = chronological.
+    date: text("date").notNull(),
   gratitude1: text("gratitude_1"),
   gratitude2: text("gratitude_2"),
   gratitude3: text("gratitude_3"),
@@ -39,19 +47,20 @@ export const journalEntries = sqliteTable("journal_entries", {
   sleepQuality: integer("sleep_quality"),
   // { [questionId]: string | number | boolean }
   answers: text("answers", { mode: "json" }).$type<Record<string, unknown>>(),
-  tomorrowPlan: text("tomorrow_plan"),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+    tomorrowPlan: text("tomorrow_plan"),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.date] })],
+);
 
 export const journalTasks = sqliteTable(
   "journal_tasks",
   {
     id: text("id").primaryKey(),
-    date: text("date")
-      .notNull()
-      .references(() => journalEntries.date, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    date: text("date").notNull(),
     kind: text("kind", { enum: ["goal", "nonNegotiable", "secondary"] }).notNull(),
     text: text("text").notNull(),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
@@ -61,13 +70,17 @@ export const journalTasks = sqliteTable(
     // a tappable Link without parsing the human-readable text.
     movedToDate: text("moved_to_date"),
   },
-  (t) => [index("journal_tasks_date_kind").on(t.date, t.kind)],
+  (t) => [
+    index("journal_tasks_date_kind").on(t.date, t.kind),
+    index("journal_tasks_user_date").on(t.userId, t.date),
+  ],
 );
 
 // ---------- Habits ----------
 
 export const habits = sqliteTable("habits", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   emoji: text("emoji"),
   color: text("color").notNull().default("#10b981"),
@@ -105,6 +118,7 @@ export const habitValueLogs = sqliteTable(
   "habit_value_logs",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     habitId: text("habit_id")
       .notNull()
       .references(() => habits.id, { onDelete: "cascade" }),
@@ -130,6 +144,7 @@ export const habitValueLogs = sqliteTable(
 export const habitLogs = sqliteTable(
   "habit_logs",
   {
+    userId: text("user_id").notNull(),
     habitId: text("habit_id")
       .notNull()
       .references(() => habits.id, { onDelete: "cascade" }),
@@ -148,6 +163,7 @@ export const habitLogs = sqliteTable(
 
 export const splits = sqliteTable("splits", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   emoji: text("emoji"),
   color: text("color").notNull().default("#10b981"),
@@ -160,6 +176,7 @@ export const splits = sqliteTable("splits", {
 
 export const exercises = sqliteTable("exercises", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   emoji: text("emoji"),
   color: text("color").notNull().default("#10b981"),
@@ -181,6 +198,7 @@ export const exercises = sqliteTable("exercises", {
 export const splitExercises = sqliteTable(
   "split_exercises",
   {
+    userId: text("user_id").notNull(),
     splitId: text("split_id")
       .notNull()
       .references(() => splits.id, { onDelete: "cascade" }),
@@ -199,6 +217,7 @@ export const workouts = sqliteTable(
   "workouts",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     date: text("date").notNull(),
     splitId: text("split_id").references(() => splits.id, { onDelete: "set null" }),
     notes: text("notes"),
@@ -214,6 +233,7 @@ export const workoutSets = sqliteTable(
   "workout_sets",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     workoutId: text("workout_id")
       .notNull()
       .references(() => workouts.id, { onDelete: "cascade" }),
@@ -242,6 +262,7 @@ export const bodyWeightLogs = sqliteTable(
   "body_weight_logs",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     date: text("date").notNull(),
     weightKg: real("weight_kg").notNull(),
     note: text("note"),
@@ -256,6 +277,7 @@ export const bodyWeightLogs = sqliteTable(
 
 export const pomodoroCategories = sqliteTable("pomodoro_categories", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   emoji: text("emoji"),
   color: text("color").notNull().default("#10b981"),
@@ -270,6 +292,7 @@ export const pomodoroSessions = sqliteTable(
   "pomodoro_sessions",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     date: text("date").notNull(), // YYYY-MM-DD (local-tz)
     startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp" }).notNull(),
@@ -296,6 +319,7 @@ export const goals = sqliteTable(
   "goals",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     // Period namespace. `periodKey` is scoped to this enum:
     //   week  -> "2026-W21"     (ISO 8601 week)
     //   month -> "2026-05"
@@ -355,6 +379,7 @@ export const goalProgress = sqliteTable(
   "goal_progress",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     goalId: text("goal_id")
       .notNull()
       .references(() => goals.id, { onDelete: "cascade" }),
@@ -373,6 +398,7 @@ export const goalChecklist = sqliteTable(
   "goal_checklist",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     goalId: text("goal_id")
       .notNull()
       .references(() => goals.id, { onDelete: "cascade" }),
@@ -385,10 +411,129 @@ export const goalChecklist = sqliteTable(
 
 // ---------- Settings (single-row KV) ----------
 
-export const settings = sqliteTable("settings", {
-  key: text("key").primaryKey(),
-  value: text("value", { mode: "json" }),
-});
+export const settings = sqliteTable(
+  "settings",
+  {
+    userId: text("user_id").notNull(),
+    key: text("key").notNull(),
+    value: text("value", { mode: "json" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
+// ---------- Auth (Phase 12) ----------
+
+// One row per user. Identity for floating-tile login screen + emoji-passphrase auth.
+// `passhash` is SHA-256(orderedPassphraseEmojis + salt) hex. Null until the user
+// completes their first login (used for auto-seeded users like the original owner,
+// who set their passphrase on first sign-in). `honeypotEmoji` is a single emoji
+// stored at signup; any login attempt that includes it returns "wrong combo".
+// `tileGradientFrom/To`, `tileFont`, `tileBorder` drive the per-user tile look on
+// the login roster. `recoveryStrokesJson` is the resampled 64-point doodle drawn
+// at signup, used by the "forgot passphrase" doodle-match recovery flow.
+export const users = sqliteTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // Stored lowercased copy for unique-index enforcement (SQLite has no
+    // expression indexes via Drizzle yet).
+    nameLower: text("name_lower").notNull(),
+    passhash: text("passhash"),
+    salt: text("salt"),
+    honeypotEmoji: text("honeypot_emoji"),
+    passphraseHintEmoji: text("passphrase_hint_emoji"),
+    tileGradientFrom: text("tile_gradient_from").notNull().default("#4fa896"),
+    tileGradientTo: text("tile_gradient_to").notNull().default("#7fc7b9"),
+    tileFont: text("tile_font", {
+      enum: ["lora", "fraunces", "space_grotesk", "ibm_plex_mono"],
+    })
+      .notNull()
+      .default("lora"),
+    tileBorder: text("tile_border", {
+      enum: ["rounded", "square", "wax_seal", "stamped"],
+    })
+      .notNull()
+      .default("rounded"),
+    recoveryStrokesJson: text("recovery_strokes_json"),
+    isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("users_name_lower_unique").on(t.nameLower)],
+);
+
+// One row per active session. 14-day sliding expiry — middleware bumps
+// `expiresAt + lastSeenAt` on every authed request older than 24h.
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceNickname: text("device_nickname"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    index("sessions_user").on(t.userId),
+    index("sessions_expires_at").on(t.expiresAt),
+  ],
+);
+
+// Rolling-window log of login + recovery attempts per user. `kind`
+// partitions throttle counts: 'login' (3-fail hint), 'recovery_doodle',
+// 'recovery_code' (Part F).
+export const loginAttempts = sqliteTable(
+  "login_attempts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    succeeded: integer("succeeded", { mode: "boolean" }).notNull(),
+    kind: text("kind", {
+      enum: ["login", "recovery_doodle", "recovery_code"],
+    })
+      .notNull()
+      .default("login"),
+    attemptedAt: integer("attempted_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    index("login_attempts_user_attempted").on(t.userId, t.attemptedAt),
+  ],
+);
+
+// Owner-issued 6-digit codes for friend recovery. Only `code_hash` (SHA-256)
+// is stored; plaintext is shown to the owner once at issue time.
+export const recoveryCodes = sqliteTable(
+  "recovery_codes",
+  {
+    id: text("id").primaryKey(),
+    targetUserId: text("target_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    issuedByUserId: text("issued_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+  },
+  (t) => [index("recovery_codes_target_active").on(t.targetUserId, t.usedAt)],
+);
 
 // ---------- Books (Phase 11.1) ----------
 
@@ -399,6 +544,7 @@ export const books = sqliteTable(
   "books",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
     title: text("title").notNull(),
     author: text("author"),
     totalPages: integer("total_pages"),

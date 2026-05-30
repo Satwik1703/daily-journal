@@ -2,12 +2,13 @@
 
 import { db } from "@/db/client";
 import { journalTasks } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { formatShortDate, isValidDateString } from "@/lib/dates";
 import { ensureEntry, nextTaskPosition } from "@/db/queries/journal-tasks";
 import { TASK_KINDS, TASK_TRACE_MARKER, isTraceTask, type TaskKind } from "@/lib/task-meta";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_TEXT_LEN = 240;
 
@@ -33,90 +34,111 @@ export async function addTask(input: {
   text?: string;
 }): Promise<{ id: string }> {
   if (!isValidDateString(input.date)) throw new Error(`Invalid date: ${input.date}`);
+  const { user } = await requireUser();
   const kind = sanitizeKind(input.kind);
-  const text = sanitizeText(input.text ?? "", true); // allow empty for "blank row added"
-  await ensureEntry(input.date);
+  const text = sanitizeText(input.text ?? "", true);
+  await ensureEntry(user.id, input.date);
   const id = input.id ?? nanoid(12);
-  const position = await nextTaskPosition(input.date, kind);
-  await db.insert(journalTasks).values({ id, date: input.date, kind, text, position });
+  const position = await nextTaskPosition(user.id, input.date, kind);
+  await db.insert(journalTasks).values({
+    id,
+    userId: user.id,
+    date: input.date,
+    kind,
+    text,
+    position,
+  });
   revalidatePath(`/journal/${input.date}`);
   return { id };
 }
 
 export async function toggleTask(id: string): Promise<{ done: boolean }> {
   if (!id) throw new Error("id required");
-  const existing = await db.select().from(journalTasks).where(eq(journalTasks.id, id)).limit(1);
+  const { user } = await requireUser();
+  const existing = await db
+    .select()
+    .from(journalTasks)
+    .where(and(eq(journalTasks.id, id), eq(journalTasks.userId, user.id)))
+    .limit(1);
   const row = existing[0];
   if (!row) throw new Error("task not found");
   const done = !row.done;
-  await db.update(journalTasks).set({ done }).where(eq(journalTasks.id, id));
+  await db
+    .update(journalTasks)
+    .set({ done })
+    .where(and(eq(journalTasks.id, id), eq(journalTasks.userId, user.id)));
   revalidatePath(`/journal/${row.date}`);
   return { done };
 }
 
 export async function updateTaskText(input: { id: string; text: string }): Promise<void> {
   if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
   const text = sanitizeText(input.text, true);
-  const existing = await db.select().from(journalTasks).where(eq(journalTasks.id, input.id)).limit(1);
+  const existing = await db
+    .select()
+    .from(journalTasks)
+    .where(and(eq(journalTasks.id, input.id), eq(journalTasks.userId, user.id)))
+    .limit(1);
   const row = existing[0];
   if (!row) throw new Error("task not found");
-  await db.update(journalTasks).set({ text }).where(eq(journalTasks.id, input.id));
+  await db
+    .update(journalTasks)
+    .set({ text })
+    .where(and(eq(journalTasks.id, input.id), eq(journalTasks.userId, user.id)));
   revalidatePath(`/journal/${row.date}`);
 }
 
 export async function deleteTask(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  const existing = await db.select().from(journalTasks).where(eq(journalTasks.id, id)).limit(1);
+  const { user } = await requireUser();
+  const existing = await db
+    .select()
+    .from(journalTasks)
+    .where(and(eq(journalTasks.id, id), eq(journalTasks.userId, user.id)))
+    .limit(1);
   const row = existing[0];
   if (!row) return;
-  await db.delete(journalTasks).where(eq(journalTasks.id, id));
+  await db
+    .delete(journalTasks)
+    .where(and(eq(journalTasks.id, id), eq(journalTasks.userId, user.id)));
   revalidatePath(`/journal/${row.date}`);
 }
 
 const TRACE_EXCERPT_MAX = 60;
 
-/**
- * Move a journal task to a different date. Leaves a small trace stub on
- * the original date so the calendar still tells the truth ("you considered
- * this on day A, deferred it to day B").
- *
- * Throws on: invalid id, missing task, same-date moves, moving a trace
- * stub, or invalid newDate.
- */
 export async function moveJournalTask(input: {
   id: string;
   newDate: string;
 }): Promise<{ ok: true }> {
   if (!input.id) throw new Error("id required");
   if (!isValidDateString(input.newDate)) throw new Error(`Invalid newDate: ${input.newDate}`);
+  const { user } = await requireUser();
   const existing = await db
     .select()
     .from(journalTasks)
-    .where(eq(journalTasks.id, input.id))
+    .where(and(eq(journalTasks.id, input.id), eq(journalTasks.userId, user.id)))
     .limit(1);
   const row = existing[0];
   if (!row) throw new Error("task not found");
   if (isTraceTask(row.text)) throw new Error("can't move a trace stub");
   if (row.date === input.newDate) throw new Error("newDate matches current date");
 
-  await ensureEntry(input.newDate);
-  const newPosition = await nextTaskPosition(input.newDate, row.kind as TaskKind);
+  await ensureEntry(user.id, input.newDate);
+  const newPosition = await nextTaskPosition(user.id, input.newDate, row.kind as TaskKind);
   await db
     .update(journalTasks)
     .set({ date: input.newDate, position: newPosition, done: false })
-    .where(eq(journalTasks.id, input.id));
+    .where(and(eq(journalTasks.id, input.id), eq(journalTasks.userId, user.id)));
 
-  // Leave a trace stub on the original date.
-  // Format: "{originalText} → Moved to {Month DD}". Excerpted to keep the
-  // row compact when the task text is long. `movedToDate` lets TraceRow be
-  // a Link without parsing the human-readable text.
   const excerpt =
     row.text.length > TRACE_EXCERPT_MAX
       ? row.text.slice(0, TRACE_EXCERPT_MAX - 1) + "…"
       : row.text;
-  const tracePosition = await nextTaskPosition(row.date, row.kind as TaskKind);
+  const tracePosition = await nextTaskPosition(user.id, row.date, row.kind as TaskKind);
   await db.insert(journalTasks).values({
     id: nanoid(12),
+    userId: user.id,
     date: row.date,
     kind: row.kind,
     text: `${excerpt}${TASK_TRACE_MARKER}${formatShortDate(input.newDate)}`,
@@ -130,18 +152,13 @@ export async function moveJournalTask(input: {
   return { ok: true };
 }
 
-/**
- * Persist a new ordering for tasks within a single (date, kind) group.
- * Array index becomes the `position` value. Validates every id belongs to
- * the given date + kind so the user can't accidentally reorder across kinds
- * (move-task is the operation for that).
- */
 export async function reorderTasks(input: {
   date: string;
   kind: string;
   orderedIds: string[];
 }): Promise<void> {
   if (!isValidDateString(input.date)) throw new Error(`Invalid date: ${input.date}`);
+  const { user } = await requireUser();
   const kind = sanitizeKind(input.kind);
   if (!Array.isArray(input.orderedIds)) throw new Error("orderedIds must be an array");
   const seen = new Set<string>();
@@ -156,8 +173,14 @@ export async function reorderTasks(input: {
       await tx
         .update(journalTasks)
         .set({ position: i })
-        .where(eq(journalTasks.id, input.orderedIds[i]));
+        .where(
+          and(
+            eq(journalTasks.id, input.orderedIds[i]),
+            eq(journalTasks.userId, user.id),
+          ),
+        );
     }
   });
+  void kind;
   revalidatePath(`/journal/${input.date}`);
 }

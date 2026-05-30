@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { habits, habitLogs, journalEntries } from "@/db/schema";
-import { between, isNull } from "drizzle-orm";
+import { and, between, eq, isNull } from "drizzle-orm";
 import { addDays, todayLocal, type DateString } from "@/lib/dates";
 
 export type DailyMetric = {
@@ -14,7 +14,7 @@ export type HabitCompletionRow = {
   date: DateString;
   done: number;
   active: number;
-  pct: number; // 0..1
+  pct: number;
 };
 
 export type RangeData = {
@@ -28,7 +28,10 @@ export type RangeData = {
   topWords: { word: string; count: number }[];
 };
 
-export async function getRangeData(rangeDays: number): Promise<RangeData> {
+export async function getRangeData(
+  userId: string,
+  rangeDays: number,
+): Promise<RangeData> {
   const end = todayLocal();
   const start = addDays(end, -(rangeDays - 1));
   const dates: DateString[] = [];
@@ -46,9 +49,22 @@ export async function getRangeData(rangeDays: number): Promise<RangeData> {
         gratitude3: journalEntries.gratitude3,
       })
       .from(journalEntries)
-      .where(between(journalEntries.date, start, end)),
-    db.select().from(habits).where(isNull(habits.archivedAt)),
-    db.select().from(habitLogs).where(between(habitLogs.date, start, end)),
+      .where(
+        and(
+          eq(journalEntries.userId, userId),
+          between(journalEntries.date, start, end),
+        ),
+      ),
+    db
+      .select()
+      .from(habits)
+      .where(and(eq(habits.userId, userId), isNull(habits.archivedAt))),
+    db
+      .select()
+      .from(habitLogs)
+      .where(
+        and(eq(habitLogs.userId, userId), between(habitLogs.date, start, end)),
+      ),
   ]);
 
   const entryByDate = new Map(entries.map((e) => [e.date, e]));

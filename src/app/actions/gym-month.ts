@@ -5,6 +5,7 @@ import { getMaxDailyVolumeInRange } from "@/db/queries/gym";
 import { addDays, todayLocal } from "@/lib/dates";
 import { computeGymDayStatus } from "@/lib/gym-meta";
 import type { JournalStatus } from "@/lib/journal-status";
+import { requireUser } from "@/lib/auth/context";
 
 /**
  * Returns a JournalStatus map for the calendar popover used in the gym date
@@ -15,6 +16,7 @@ import type { JournalStatus } from "@/lib/journal-status";
 export async function fetchGymMonthStatusForPopover(
   monthAnchor: string,
 ): Promise<Record<string, JournalStatus>> {
+  const { user } = await requireUser();
   // Window stats for the visible month (padded ±7 in fetchGymMonthStatus).
   const monthStats = await fetchGymMonthStatus(monthAnchor);
 
@@ -22,7 +24,7 @@ export async function fetchGymMonthStatusForPopover(
   // palette stays stable across months. Recomputed per call — cheap.
   const today = todayLocal();
   const ninetyStart = addDays(today, -89);
-  const refMaxVolume = await getMaxDailyVolumeInRange(ninetyStart, today);
+  const refMaxVolume = await getMaxDailyVolumeInRange(user.id, ninetyStart, today);
 
   const out: Record<string, JournalStatus> = {};
   for (const [date, info] of Object.entries(monthStats)) {

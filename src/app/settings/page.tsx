@@ -9,6 +9,7 @@ import {
   getExercises,
   getSplitExercises,
 } from "@/db/queries/gym";
+import { requireUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,13 @@ import { SoundPicker } from "./_components/sound-picker";
 import { SyncStatusPanel } from "./_components/sync-status-panel";
 import { SplitsManager } from "./_components/splits-manager";
 import { ExercisesManager } from "./_components/exercises-manager";
+import { DevicesCard } from "./_components/devices-card";
+import { OwnerRecoveryCard } from "./_components/owner-recovery-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
 export default async function SettingsPage() {
+  const { user } = await requireUser();
   const [
     active,
     archived,
@@ -32,14 +36,14 @@ export default async function SettingsPage() {
     exercises,
     joins,
   ] = await Promise.all([
-    getActiveQuestions(),
-    getArchivedQuestions(),
-    getActiveCategories(),
-    getArchivedCategories(),
-    getPomodoroSoundId(),
-    getSplits(true),
-    getExercises(true),
-    getSplitExercises(),
+    getActiveQuestions(user.id),
+    getArchivedQuestions(user.id),
+    getActiveCategories(user.id),
+    getArchivedCategories(user.id),
+    getPomodoroSoundId(user.id),
+    getSplits(user.id, true),
+    getExercises(user.id, true),
+    getSplitExercises(user.id),
   ]);
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
@@ -49,6 +53,10 @@ export default async function SettingsPage() {
       </div>
 
       <SyncStatusPanel />
+
+      <DevicesCard />
+
+      {user.isOwner ? <OwnerRecoveryCard /> : null}
 
       <QuestionsManager active={active} archived={archived} />
 

@@ -16,6 +16,7 @@ import {
   suggestNextSplit,
   type ProgressionSuggestion,
 } from "@/lib/gym-meta";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,16 @@ export async function GET(
   if (!isValidDateString(date)) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
+  const session = await getCurrentUser();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.user.id;
 
   const [library, todayData, latestBW, last7BW, allWorkouts] = await Promise.all([
-    getAllSplitsWithExercises(),
-    getWorkoutForDate(date),
-    getLatestBodyWeightAsOf(date),
-    getBodyWeightForRange(addDays(date, -6), date),
-    getAllWorkoutsLight(),
+    getAllSplitsWithExercises(userId),
+    getWorkoutForDate(userId, date),
+    getLatestBodyWeightAsOf(userId, date),
+    getBodyWeightForRange(userId, addDays(date, -6), date),
+    getAllWorkoutsLight(userId),
   ]);
 
   const splitExerciseIds = todayData.workout?.splitId
@@ -44,22 +48,19 @@ export async function GET(
   const usedTodayIds = Array.from(new Set(todayData.sets.map((s) => s.exerciseId)));
   const prefillIds = Array.from(new Set([...splitExerciseIds, ...usedTodayIds]));
 
-  // Prefill (single most recent set) + last-session (all sets that day) per ex.
   const [prefill, lastSession] = await Promise.all([
-    getLastSetPerExerciseBefore(date, prefillIds),
-    getLastSessionSetsPerExercise(date, prefillIds),
+    getLastSetPerExerciseBefore(userId, date, prefillIds),
+    getLastSessionSetsPerExercise(userId, date, prefillIds),
   ]);
 
-  // Progression suggestion per exercise.
   const progressionSuggestions: Record<string, ProgressionSuggestion> = {};
   for (const id of prefillIds) {
-    const session = lastSession[id];
-    progressionSuggestions[id] = session
-      ? computeProgressionSuggestion(session.sets)
+    const lastSess = lastSession[id];
+    progressionSuggestions[id] = lastSess
+      ? computeProgressionSuggestion(lastSess.sets)
       : { kind: "none" };
   }
 
-  // Split suggestion (only when no split picked for today).
   let splitSuggestion: { splitId: string; splitName: string; daysSince: number } | null = null;
   if (!todayData.workout || todayData.workout.splitId == null) {
     const recent = allWorkouts.filter(

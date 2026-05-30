@@ -26,26 +26,25 @@ export type GoalProgressRow = typeof goalProgress.$inferSelect;
 export type GoalChecklistItem = typeof goalChecklist.$inferSelect;
 
 export type GoalWithDerived = GoalRow & {
-  /**
-   * Type-dependent derived progress value.
-   *  - number:    SUM(goalProgress.delta) for this goal
-   *  - habit:     habit_logs in period (Day C will populate; Day B returns 0)
-   *  - pomodoro:  pomodoro_sessions in period (Day C will populate; Day B returns 0)
-   *  - milestone: count of done checklist items (NOT a ratio — caller divides by total)
-   */
   currentValue: number;
   checklist?: GoalChecklistItem[];
   children?: GoalWithDerived[];
 };
 
-// ---------- Internal helpers ----------
-
-async function listChecklistsForGoals(goalIds: string[]): Promise<Map<string, GoalChecklistItem[]>> {
+async function listChecklistsForGoals(
+  userId: string,
+  goalIds: string[],
+): Promise<Map<string, GoalChecklistItem[]>> {
   if (goalIds.length === 0) return new Map();
   const rows = await db
     .select()
     .from(goalChecklist)
-    .where(inArray(goalChecklist.goalId, goalIds))
+    .where(
+      and(
+        eq(goalChecklist.userId, userId),
+        inArray(goalChecklist.goalId, goalIds),
+      ),
+    )
     .orderBy(asc(goalChecklist.position), asc(goalChecklist.id));
   const out = new Map<string, GoalChecklistItem[]>();
   for (const r of rows) {
@@ -59,7 +58,10 @@ async function listChecklistsForGoals(goalIds: string[]): Promise<Map<string, Go
   return out;
 }
 
-async function sumProgressForGoals(goalIds: string[]): Promise<Map<string, number>> {
+async function sumProgressForGoals(
+  userId: string,
+  goalIds: string[],
+): Promise<Map<string, number>> {
   if (goalIds.length === 0) return new Map();
   const rows = await db
     .select({
@@ -67,23 +69,18 @@ async function sumProgressForGoals(goalIds: string[]): Promise<Map<string, numbe
       total: sum(goalProgress.delta).mapWith(Number),
     })
     .from(goalProgress)
-    .where(inArray(goalProgress.goalId, goalIds))
+    .where(
+      and(
+        eq(goalProgress.userId, userId),
+        inArray(goalProgress.goalId, goalIds),
+      ),
+    )
     .groupBy(goalProgress.goalId);
   return new Map(rows.map((r) => [r.goalId, r.total ?? 0]));
 }
 
-/**
- * Days-in-range that the habit was "done", per its tracking kind.
- *  - binary  → count habit_logs rows (already one per day, PK)
- *  - number  → count distinct dates where SUM(value) >= dailyTarget
- *  - pomodoro → count distinct dates where COUNT(sessions for cat) >= dailyTarget
- *
- * Habit row is loaded once so we can dispatch on `trackingKind`. Missing or
- * malformed daily_target collapses to "any positive value counts" so a
- * goal linked to a misconfigured number/pomo habit still has a working
- * derivation rather than silently sitting at 0.
- */
 async function habitCountInRange(
+  userId: string,
   habitId: string,
   start: DateString,
   end: DateString,
@@ -95,7 +92,7 @@ async function habitCountInRange(
       pomoCategoryId: habits.pomoCategoryId,
     })
     .from(habits)
-    .where(eq(habits.id, habitId))
+    .where(and(eq(habits.userId, userId), eq(habits.id, habitId)))
     .limit(1);
   const h = habitRow[0];
   if (!h) return 0;
@@ -104,7 +101,13 @@ async function habitCountInRange(
     const rows = await db
       .select({ n: count(habitLogs.date) })
       .from(habitLogs)
-      .where(and(eq(habitLogs.habitId, habitId), between(habitLogs.date, start, end)));
+      .where(
+        and(
+          eq(habitLogs.userId, userId),
+          eq(habitLogs.habitId, habitId),
+          between(habitLogs.date, start, end),
+        ),
+      );
     return rows[0]?.n ?? 0;
   }
 
@@ -112,7 +115,13 @@ async function habitCountInRange(
     const rows = await db
       .select({ date: habitValueLogs.date, value: habitValueLogs.value })
       .from(habitValueLogs)
-      .where(and(eq(habitValueLogs.habitId, habitId), between(habitValueLogs.date, start, end)));
+      .where(
+        and(
+          eq(habitValueLogs.userId, userId),
+          eq(habitValueLogs.habitId, habitId),
+          between(habitValueLogs.date, start, end),
+        ),
+      );
     const perDay = new Map<string, number>();
     for (const r of rows) perDay.set(r.date, (perDay.get(r.date) ?? 0) + r.value);
     const target = h.dailyTarget && h.dailyTarget > 0 ? h.dailyTarget : null;
@@ -123,13 +132,13 @@ async function habitCountInRange(
     return qualifying;
   }
 
-  // pomodoro
   if (!h.pomoCategoryId) return 0;
   const rows = await db
     .select({ date: pomodoroSessions.date })
     .from(pomodoroSessions)
     .where(
       and(
+        eq(pomodoroSessions.userId, userId),
         eq(pomodoroSessions.categoryId, h.pomoCategoryId),
         between(pomodoroSessions.date, start, end),
       ),
@@ -145,12 +154,16 @@ async function habitCountInRange(
 }
 
 async function pomodoroValueInRange(
+  userId: string,
   pomoCategoryId: string | null,
   metric: "minutes" | "pomos" | "sessions",
   start: DateString,
   end: DateString,
 ): Promise<number> {
-  const filters = [between(pomodoroSessions.date, start, end)];
+  const filters = [
+    eq(pomodoroSessions.userId, userId),
+    between(pomodoroSessions.date, start, end),
+  ];
   if (pomoCategoryId) filters.push(eq(pomodoroSessions.categoryId, pomoCategoryId));
   const rows = await db
     .select({ duration: pomodoroSessions.durationMin })
@@ -158,18 +171,11 @@ async function pomodoroValueInRange(
     .where(and(...filters));
   if (metric === "sessions") return rows.length;
   if (metric === "minutes") return rows.reduce((acc, r) => acc + (r.duration ?? 0), 0);
-  // pomos
   return rows.reduce((acc, r) => acc + pomoUnits(r.duration ?? 0), 0);
 }
 
-/**
- * Derive currentValue per goal type.
- *  - number:    SUM(goalProgress.delta) for the goal
- *  - habit:     COUNT(habit_logs) where date in period range
- *  - pomodoro:  SUM/COUNT pomodoroSessions filtered by category + metric
- *  - milestone: COUNT of done checklist items
- */
 async function deriveCurrentValues(
+  userId: string,
   rows: GoalRow[],
   rangeFor: (g: GoalRow) => { start: DateString; end: DateString },
 ): Promise<{
@@ -182,12 +188,12 @@ async function deriveCurrentValues(
   const pomoGoals = rows.filter((r) => r.type === "pomodoro" && r.pomoMetric);
 
   const [numberTotals, checklists, habitCounts, pomoValues] = await Promise.all([
-    sumProgressForGoals(numberIds),
-    listChecklistsForGoals(milestoneIds),
+    sumProgressForGoals(userId, numberIds),
+    listChecklistsForGoals(userId, milestoneIds),
     Promise.all(
       habitGoals.map(async (g) => {
         const { start, end } = rangeFor(g);
-        const n = await habitCountInRange(g.habitId!, start, end);
+        const n = await habitCountInRange(userId, g.habitId!, start, end);
         return [g.id, n] as const;
       }),
     ),
@@ -195,6 +201,7 @@ async function deriveCurrentValues(
       pomoGoals.map(async (g) => {
         const { start, end } = rangeFor(g);
         const n = await pomodoroValueInRange(
+          userId,
           g.pomoCategoryId ?? null,
           g.pomoMetric as "minutes" | "pomos" | "sessions",
           start,
@@ -226,29 +233,15 @@ async function deriveCurrentValues(
   return { values, checklists };
 }
 
-// ---------- Public API ----------
-
-/**
- * Fetch all goals for a (period, periodKey) including derived currentValue
- * and (for milestones) inline checklist items.
- *
- * Auto-finalize: if the period's `end < today` and any goal is still
- * `active`, this stamps them to `achieved` / `missed` based on derived
- * progress. Idempotent — only touches rows with `finalizedAt = null`. No
- * cron required.
- */
 export async function getGoalsForPeriod(
+  userId: string,
   period: GoalPeriod,
   periodKey: string,
 ): Promise<GoalWithDerived[]> {
   const range = periodRangeFor(periodKey, period);
 
-  // Lazy auto-extend: on EVERY week read, push every active reverse-cascade
-  // tree forward by one week if its latest weekly clone is behind. Idempotent
-  // (de-duped by periodKey) and cheap (one query for the latest weekly per
-  // tree). Runs before the main select so newly-inserted rows show up below.
   if (period === "week") {
-    await autoExtendReverseCascadeTrees(periodKey);
+    await autoExtendReverseCascadeTrees(userId, periodKey);
   }
 
   const rows = await db
@@ -256,6 +249,7 @@ export async function getGoalsForPeriod(
     .from(goals)
     .where(
       and(
+        eq(goals.userId, userId),
         eq(goals.period, period),
         eq(goals.periodKey, periodKey),
         isNull(goals.archivedAt),
@@ -267,9 +261,8 @@ export async function getGoalsForPeriod(
 
   const rangeFor = () => range;
 
-  const { values, checklists } = await deriveCurrentValues(rows, rangeFor);
+  const { values, checklists } = await deriveCurrentValues(userId, rows, rangeFor);
 
-  // Lazy auto-finalize for closed periods.
   const today = todayLocal();
   if (range.end < today) {
     const stillActive = rows.filter(
@@ -291,8 +284,7 @@ export async function getGoalsForPeriod(
           await db
             .update(goals)
             .set({ status: achieved ? "achieved" : "missed", finalizedAt: now })
-            .where(eq(goals.id, g.id));
-          // Reflect locally so this read sees the new status.
+            .where(and(eq(goals.userId, userId), eq(goals.id, g.id)));
           (g as GoalRow).status = achieved ? "achieved" : "missed";
           (g as GoalRow).finalizedAt = now;
         }),
@@ -307,12 +299,8 @@ export async function getGoalsForPeriod(
   }));
 }
 
-/**
- * History strip data: the most recent N periods preceding `currentKey`.
- * Returns an entry per period containing the goals (with derived values)
- * so the caller can render colored summary chips.
- */
 export async function getGoalsHistory(
+  userId: string,
   period: GoalPeriod,
   currentKey: string,
   count: number,
@@ -325,35 +313,28 @@ export async function getGoalsHistory(
   }
   const results: Array<{ periodKey: string; goals: GoalWithDerived[] }> = [];
   for (const key of keys) {
-    const goalsForKey = await getGoalsForPeriod(period, key);
+    const goalsForKey = await getGoalsForPeriod(userId, period, key);
     results.push({ periodKey: key, goals: goalsForKey });
   }
   return results;
 }
 
-/**
- * Per-week status map for the goals heatmap on the year view. Computed by
- * loading all goals for the year (and its month/week children) and folding
- * them per ISO week into the shared status palette.
- */
 export async function getGoalsYearHeatmap(
+  userId: string,
   year: number,
 ): Promise<{ byWeek: Record<string, "crazy" | "great" | "good" | "avg" | "bad" | "empty"> }> {
-  // Pull every goal whose periodKey starts with the year.
   const allRows = await db
     .select()
     .from(goals)
-    .where(isNull(goals.archivedAt));
+    .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)));
   const yearStr = String(year);
   const inYear = allRows.filter((r) => r.periodKey.startsWith(yearStr));
   if (inYear.length === 0) return { byWeek: {} };
 
-  const { values, checklists } = await deriveCurrentValues(inYear, (g) =>
+  const { values, checklists } = await deriveCurrentValues(userId, inYear, (g) =>
     periodRangeFor(g.periodKey, g.period as GoalPeriod),
   );
 
-  // Group week-period goals by week; ignore month/year aggregates for the
-  // cell color (they'd otherwise dominate the heatmap with their own status).
   const weeklyByKey = new Map<string, typeof inYear>();
   for (const g of inYear) {
     if (g.period !== "week") continue;
@@ -386,20 +367,23 @@ export async function getGoalsYearHeatmap(
   return { byWeek };
 }
 
-/**
- * Children grafted onto a parent goal. Used for cascade rollup display on
- * year/month view. Returns child rows with derived currentValue.
- */
 export async function getChildrenOfGoal(
+  userId: string,
   parentId: string,
 ): Promise<GoalWithDerived[]> {
   const rows = await db
     .select()
     .from(goals)
-    .where(and(eq(goals.parentId, parentId), isNull(goals.archivedAt)))
+    .where(
+      and(
+        eq(goals.userId, userId),
+        eq(goals.parentId, parentId),
+        isNull(goals.archivedAt),
+      ),
+    )
     .orderBy(asc(goals.periodKey));
   if (rows.length === 0) return [];
-  const { values, checklists } = await deriveCurrentValues(rows, (g) =>
+  const { values, checklists } = await deriveCurrentValues(userId, rows, (g) =>
     periodRangeFor(g.periodKey, g.period as GoalPeriod),
   );
   return rows.map((r) => ({
@@ -409,12 +393,8 @@ export async function getChildrenOfGoal(
   }));
 }
 
-/**
- * Archived goals for a period (no derived values). Used by the
- * "Show archived" toggle on /goals so a user can unarchive after
- * having archived something.
- */
 export async function getArchivedGoalsForPeriod(
+  userId: string,
   period: GoalPeriod,
   periodKey: string,
 ): Promise<GoalRow[]> {
@@ -423,6 +403,7 @@ export async function getArchivedGoalsForPeriod(
     .from(goals)
     .where(
       and(
+        eq(goals.userId, userId),
         eq(goals.period, period),
         eq(goals.periodKey, periodKey),
         isNotNull(goals.archivedAt),
@@ -431,29 +412,37 @@ export async function getArchivedGoalsForPeriod(
     .orderBy(asc(goals.position), asc(goals.createdAt));
 }
 
-/** Find a single goal (any period) by id. Useful for action validation. */
-export async function findGoalById(id: string): Promise<GoalRow | null> {
-  const rows = await db.select().from(goals).where(eq(goals.id, id)).limit(1);
+export async function findGoalById(
+  userId: string,
+  id: string,
+): Promise<GoalRow | null> {
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.userId, userId), eq(goals.id, id)))
+    .limit(1);
   return rows[0] ?? null;
 }
 
-/** Next position within a (period, periodKey) bucket. */
 export async function nextPositionFor(
+  userId: string,
   period: GoalPeriod,
   periodKey: string,
 ): Promise<number> {
   const rows = await db
     .select({ position: goals.position })
     .from(goals)
-    .where(and(eq(goals.period, period), eq(goals.periodKey, periodKey)));
+    .where(
+      and(
+        eq(goals.userId, userId),
+        eq(goals.period, period),
+        eq(goals.periodKey, periodKey),
+      ),
+    );
   if (rows.length === 0) return 0;
   return Math.max(...rows.map((r) => r.position)) + 1;
 }
 
-/**
- * Cheap helper: in-period date range for a periodKey. Re-exported here so
- * callers in server code don't need to import lib/dates separately.
- */
 export function rangeForPeriod(
   periodKey: string,
   period: GoalPeriod,
@@ -461,30 +450,23 @@ export function rangeForPeriod(
   return periodRangeFor(periodKey, period);
 }
 
-/** Today helper, here for parity with other queries that already do this. */
 export function getToday(): DateString {
   return todayLocal();
 }
 
-// ---------- Lazy reverse-cascade auto-extend (Phase 11.1) ----------
-//
-// On every week-period read, scan active yearly goals. For each one that
-// looks like a reverse-cascade tree (i.e. has any weekly descendants), if the
-// latest weekly clone's periodKey < nextWeekKey AND the year still has room,
-// insert exactly one weekly clone for the next missing week — plus its
-// monthly parent if that month isn't present yet. Effectively self-heals
-// every Sunday without a cron job. Heavy-lifting batch fill is still done
-// manually via scripts/extend-weekly-goals.mjs.
-async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<void> {
+async function autoExtendReverseCascadeTrees(
+  userId: string,
+  currentWeekKey: string,
+): Promise<void> {
   const nextWeekKey = shiftPeriodKey(currentWeekKey, "week", 1);
   const yearOfNext = nextWeekKey.slice(0, 4);
 
-  // Yearly roots active in the year of nextWeekKey.
   const yearlies = await db
     .select()
     .from(goals)
     .where(
       and(
+        eq(goals.userId, userId),
         eq(goals.period, "year"),
         eq(goals.periodKey, yearOfNext),
         isNull(goals.archivedAt),
@@ -494,9 +476,6 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
 
   for (const yearly of yearlies) {
     if (yearly.type === "milestone") continue;
-    // Latest weekly descendant in this tree. We identify the tree by the
-    // yearly's identity: habit-linked goals share habitId; everything else
-    // matches by title.
     const matchClauses = yearly.habitId
       ? eq(goals.habitId, yearly.habitId)
       : eq(goals.title, yearly.title);
@@ -505,6 +484,7 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
       .from(goals)
       .where(
         and(
+          eq(goals.userId, userId),
           matchClauses,
           eq(goals.period, "week"),
           isNull(goals.archivedAt),
@@ -512,24 +492,23 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
       )
       .orderBy(desc(goals.periodKey))
       .limit(1);
-    if (latestWeekly.length === 0) continue; // not a reverse-cascade tree
+    if (latestWeekly.length === 0) continue;
 
     const lastKey = latestWeekly[0].periodKey;
-    if (lastKey >= nextWeekKey) continue; // already extended past next week
+    if (lastKey >= nextWeekKey) continue;
     const targetWeekKey = nextWeekKey;
-    if (!targetWeekKey.startsWith(yearOfNext)) continue; // past year boundary
+    if (!targetWeekKey.startsWith(yearOfNext)) continue;
 
-    // Figure out the month that contains targetWeekKey's Thursday.
     const wkRange = periodRangeFor(targetWeekKey, "week");
     const thursday = addDays(wkRange.start, 4);
     const monthKey = thursday.slice(0, 7);
 
-    // Find or insert the monthly parent.
     let monthly = await db
       .select()
       .from(goals)
       .where(
         and(
+          eq(goals.userId, userId),
           matchClauses,
           eq(goals.period, "month"),
           eq(goals.periodKey, monthKey),
@@ -542,12 +521,12 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
     if (monthly.length > 0) {
       monthlyParentId = monthly[0].id;
     } else {
-      // Pull a weekly clone's targetValue to learn weeklyTarget.
       const weeklyTarget = latestWeekly[0].targetValue ?? yearly.targetValue ?? 0;
       monthlyParentId = nanoid(12);
-      const position = await nextPositionFor("month", monthKey);
+      const position = await nextPositionFor(userId, "month", monthKey);
       await db.insert(goals).values({
         id: monthlyParentId,
+        userId,
         period: "month",
         periodKey: monthKey,
         parentId: yearly.id,
@@ -555,7 +534,7 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
         emoji: yearly.emoji,
         color: yearly.color,
         type: yearly.type,
-        targetValue: weeklyTarget, // single-week month at creation; updated when more weeks join
+        targetValue: weeklyTarget,
         unit: yearly.unit,
         habitId: yearly.habitId,
         pomoCategoryId: yearly.pomoCategoryId,
@@ -563,8 +542,6 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
         status: "active",
         position,
       });
-      // Re-read so we have its row (not strictly needed but keeps the
-      // shape consistent if we ever want to use it).
       monthly = await db
         .select()
         .from(goals)
@@ -572,11 +549,11 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
         .limit(1);
     }
 
-    // Insert the weekly clone.
     const weeklyTarget = latestWeekly[0].targetValue ?? yearly.targetValue ?? 0;
-    const position = await nextPositionFor("week", targetWeekKey);
+    const position = await nextPositionFor(userId, "week", targetWeekKey);
     await db.insert(goals).values({
       id: nanoid(12),
+      userId,
       period: "week",
       periodKey: targetWeekKey,
       parentId: monthlyParentId,
@@ -595,6 +572,4 @@ async function autoExtendReverseCascadeTrees(currentWeekKey: string): Promise<vo
   }
 }
 
-// Suppress unused-import warning if the file is consumed before periodKeyFor
-// is referenced elsewhere — it's used by the action layer.
 void periodKeyFor;

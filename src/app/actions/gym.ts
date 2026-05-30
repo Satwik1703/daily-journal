@@ -16,6 +16,7 @@ import { revalidatePath } from "next/cache";
 import { isValidDateString } from "@/lib/dates";
 import { MUSCLE_GROUPS, type MuscleGroup } from "@/lib/muscle-groups";
 import { est1RM, isAllMuscleGroups } from "@/lib/gym-meta";
+import { requireUser } from "@/lib/auth/context";
 
 // ---------- Splits CRUD ----------
 
@@ -25,14 +26,19 @@ export async function createSplit(input: {
   emoji?: string | null;
   color?: string;
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const name = input.name?.trim();
   if (!name) throw new Error("Split name required");
   const id = input.id ?? nanoid(12);
   const color = input.color ?? "#10b981";
-  const maxRow = await db.select({ p: max(splits.position) }).from(splits);
+  const maxRow = await db
+    .select({ p: max(splits.position) })
+    .from(splits)
+    .where(eq(splits.userId, user.id));
   const position = (maxRow[0]?.p ?? -1) + 1;
   await db.insert(splits).values({
     id,
+    userId: user.id,
     name,
     emoji: input.emoji?.trim() || null,
     color,
@@ -50,6 +56,7 @@ export async function updateSplit(input: {
   color?: string;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
   const patch: Partial<typeof splits.$inferInsert> = {};
   if (input.name !== undefined) {
     const n = input.name.trim();
@@ -59,7 +66,10 @@ export async function updateSplit(input: {
   if (input.emoji !== undefined) patch.emoji = input.emoji?.trim() || null;
   if (input.color !== undefined) patch.color = input.color;
   if (Object.keys(patch).length > 0) {
-    await db.update(splits).set(patch).where(eq(splits.id, input.id));
+    await db
+      .update(splits)
+      .set(patch)
+      .where(and(eq(splits.id, input.id), eq(splits.userId, user.id)));
   }
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
@@ -67,30 +77,45 @@ export async function updateSplit(input: {
 
 export async function archiveSplit(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.update(splits).set({ archivedAt: new Date() }).where(eq(splits.id, id));
+  const { user } = await requireUser();
+  await db
+    .update(splits)
+    .set({ archivedAt: new Date() })
+    .where(and(eq(splits.id, id), eq(splits.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function unarchiveSplit(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.update(splits).set({ archivedAt: null }).where(eq(splits.id, id));
+  const { user } = await requireUser();
+  await db
+    .update(splits)
+    .set({ archivedAt: null })
+    .where(and(eq(splits.id, id), eq(splits.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function deleteSplit(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.delete(splits).where(eq(splits.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(splits)
+    .where(and(eq(splits.id, id), eq(splits.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function reorderSplits(orderedIds: string[]): Promise<void> {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) return;
+  const { user } = await requireUser();
   await db.transaction(async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await tx.update(splits).set({ position: i }).where(eq(splits.id, orderedIds[i]));
+      await tx
+        .update(splits)
+        .set({ position: i })
+        .where(and(eq(splits.id, orderedIds[i]), eq(splits.userId, user.id)));
     }
   });
   revalidatePath("/gym", "layout");
@@ -108,6 +133,7 @@ export async function createExercise(input: {
   notes?: string | null;
   perHand?: boolean;
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const name = input.name?.trim();
   if (!name) throw new Error("Exercise name required");
   if (!Array.isArray(input.muscleGroups) || input.muscleGroups.length === 0) {
@@ -120,10 +146,14 @@ export async function createExercise(input: {
   }
   const id = input.id ?? nanoid(12);
   const color = input.color ?? "#10b981";
-  const maxRow = await db.select({ p: max(exercises.position) }).from(exercises);
+  const maxRow = await db
+    .select({ p: max(exercises.position) })
+    .from(exercises)
+    .where(eq(exercises.userId, user.id));
   const position = (maxRow[0]?.p ?? -1) + 1;
   await db.insert(exercises).values({
     id,
+    userId: user.id,
     name,
     emoji: input.emoji?.trim() || null,
     color,
@@ -147,6 +177,7 @@ export async function updateExercise(input: {
   perHand?: boolean;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
   const patch: Partial<typeof exercises.$inferInsert> = {};
   if (input.name !== undefined) {
     const n = input.name.trim();
@@ -164,7 +195,10 @@ export async function updateExercise(input: {
   if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
   if (input.perHand !== undefined) patch.perHand = input.perHand;
   if (Object.keys(patch).length > 0) {
-    await db.update(exercises).set(patch).where(eq(exercises.id, input.id));
+    await db
+      .update(exercises)
+      .set(patch)
+      .where(and(eq(exercises.id, input.id), eq(exercises.userId, user.id)));
   }
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
@@ -172,31 +206,47 @@ export async function updateExercise(input: {
 
 export async function archiveExercise(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.update(exercises).set({ archivedAt: new Date() }).where(eq(exercises.id, id));
+  const { user } = await requireUser();
+  await db
+    .update(exercises)
+    .set({ archivedAt: new Date() })
+    .where(and(eq(exercises.id, id), eq(exercises.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function unarchiveExercise(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.update(exercises).set({ archivedAt: null }).where(eq(exercises.id, id));
+  const { user } = await requireUser();
+  await db
+    .update(exercises)
+    .set({ archivedAt: null })
+    .where(and(eq(exercises.id, id), eq(exercises.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function deleteExercise(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  // Will fail if used in any workout_sets (RESTRICT). Archive instead.
-  await db.delete(exercises).where(eq(exercises.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(exercises)
+    .where(and(eq(exercises.id, id), eq(exercises.userId, user.id)));
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
 }
 
 export async function reorderExercises(orderedIds: string[]): Promise<void> {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) return;
+  const { user } = await requireUser();
   await db.transaction(async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
-      await tx.update(exercises).set({ position: i }).where(eq(exercises.id, orderedIds[i]));
+      await tx
+        .update(exercises)
+        .set({ position: i })
+        .where(
+          and(eq(exercises.id, orderedIds[i]), eq(exercises.userId, user.id)),
+        );
     }
   });
   revalidatePath("/gym", "layout");
@@ -211,14 +261,20 @@ export async function assignExerciseToSplit(input: {
 }): Promise<void> {
   const { splitId, exerciseId } = input;
   if (!splitId || !exerciseId) throw new Error("splitId + exerciseId required");
+  const { user } = await requireUser();
   const maxRow = await db
     .select({ p: max(splitExercises.position) })
     .from(splitExercises)
-    .where(eq(splitExercises.splitId, splitId));
+    .where(
+      and(
+        eq(splitExercises.userId, user.id),
+        eq(splitExercises.splitId, splitId),
+      ),
+    );
   const position = (maxRow[0]?.p ?? -1) + 1;
   await db
     .insert(splitExercises)
-    .values({ splitId, exerciseId, position })
+    .values({ userId: user.id, splitId, exerciseId, position })
     .onConflictDoNothing();
   revalidatePath("/gym", "layout");
   revalidatePath("/settings");
@@ -230,10 +286,12 @@ export async function removeExerciseFromSplit(input: {
 }): Promise<void> {
   const { splitId, exerciseId } = input;
   if (!splitId || !exerciseId) throw new Error("splitId + exerciseId required");
+  const { user } = await requireUser();
   await db
     .delete(splitExercises)
     .where(
       and(
+        eq(splitExercises.userId, user.id),
         eq(splitExercises.splitId, splitId),
         eq(splitExercises.exerciseId, exerciseId),
       ),
@@ -247,6 +305,7 @@ export async function reorderSplitExercises(input: {
   orderedExerciseIds: string[];
 }): Promise<void> {
   if (!input.splitId || !Array.isArray(input.orderedExerciseIds)) return;
+  const { user } = await requireUser();
   await db.transaction(async (tx) => {
     for (let i = 0; i < input.orderedExerciseIds.length; i++) {
       await tx
@@ -254,6 +313,7 @@ export async function reorderSplitExercises(input: {
         .set({ position: i })
         .where(
           and(
+            eq(splitExercises.userId, user.id),
             eq(splitExercises.splitId, input.splitId),
             eq(splitExercises.exerciseId, input.orderedExerciseIds[i]),
           ),
@@ -272,11 +332,11 @@ export async function startOrGetWorkout(input: {
   splitId?: string | null;
 }): Promise<{ id: string; created: boolean }> {
   if (!isValidDateString(input.date)) throw new Error(`Invalid date: ${input.date}`);
-  // Idempotent: one workout per date. If exists, update splitId if changed and return.
+  const { user } = await requireUser();
   const existing = await db
     .select()
     .from(workouts)
-    .where(eq(workouts.date, input.date))
+    .where(and(eq(workouts.userId, user.id), eq(workouts.date, input.date)))
     .limit(1);
   if (existing.length > 0) {
     const row = existing[0];
@@ -284,13 +344,14 @@ export async function startOrGetWorkout(input: {
       await db
         .update(workouts)
         .set({ splitId: input.splitId ?? null })
-        .where(eq(workouts.id, row.id));
+        .where(and(eq(workouts.id, row.id), eq(workouts.userId, user.id)));
     }
     return { id: row.id, created: false };
   }
   const id = input.id ?? nanoid(12);
   await db.insert(workouts).values({
     id,
+    userId: user.id,
     date: input.date,
     splitId: input.splitId ?? null,
   });
@@ -305,6 +366,7 @@ export async function updateWorkout(input: {
   splitId?: string | null;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
   const patch: Partial<typeof workouts.$inferInsert> = {};
   if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
   if (input.durationMin !== undefined) {
@@ -315,14 +377,20 @@ export async function updateWorkout(input: {
   }
   if (input.splitId !== undefined) patch.splitId = input.splitId;
   if (Object.keys(patch).length > 0) {
-    await db.update(workouts).set(patch).where(eq(workouts.id, input.id));
+    await db
+      .update(workouts)
+      .set(patch)
+      .where(and(eq(workouts.id, input.id), eq(workouts.userId, user.id)));
   }
   revalidatePath("/gym", "layout");
 }
 
 export async function deleteWorkout(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.delete(workouts).where(eq(workouts.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(workouts)
+    .where(and(eq(workouts.id, id), eq(workouts.userId, user.id)));
   revalidatePath("/gym", "layout");
 }
 
@@ -342,6 +410,7 @@ export async function logSet(input: {
   if (!input.workoutId || !input.exerciseId) {
     throw new Error("workoutId + exerciseId required");
   }
+  const { user } = await requireUser();
   const id = input.id ?? nanoid(12);
   const reps =
     input.reps == null || Number.isNaN(input.reps) ? null : Math.max(0, Math.round(input.reps));
@@ -352,7 +421,6 @@ export async function logSet(input: {
   const rpe =
     input.rpe == null || Number.isNaN(input.rpe) ? null : Math.max(1, Math.min(10, input.rpe));
 
-  // Auto set number: max+1 for (workoutId, exerciseId).
   let setNumber = input.setNumber;
   if (setNumber == null) {
     const m = await db
@@ -360,6 +428,7 @@ export async function logSet(input: {
       .from(workoutSets)
       .where(
         and(
+          eq(workoutSets.userId, user.id),
           eq(workoutSets.workoutId, input.workoutId),
           eq(workoutSets.exerciseId, input.exerciseId),
         ),
@@ -367,7 +436,6 @@ export async function logSet(input: {
     setNumber = (m[0]?.p ?? 0) + 1;
   }
 
-  // PR detection: compare against all prior sets for this exercise.
   let isPR = false;
   let prKind: "weight" | "1rm" | undefined;
   if (reps != null && reps >= 1 && weightKg != null && weightKg > 0) {
@@ -376,6 +444,7 @@ export async function logSet(input: {
       .from(workoutSets)
       .where(
         and(
+          eq(workoutSets.userId, user.id),
           eq(workoutSets.exerciseId, input.exerciseId),
           sql`${workoutSets.weightKg} IS NOT NULL`,
           sql`${workoutSets.reps} IS NOT NULL`,
@@ -400,6 +469,7 @@ export async function logSet(input: {
 
   await db.insert(workoutSets).values({
     id,
+    userId: user.id,
     workoutId: input.workoutId,
     exerciseId: input.exerciseId,
     setNumber,
@@ -422,6 +492,7 @@ export async function updateSet(input: {
   note?: string | null;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
   const patch: Partial<typeof workoutSets.$inferInsert> = {};
   if (input.reps !== undefined) {
     patch.reps =
@@ -439,18 +510,25 @@ export async function updateSet(input: {
   if (input.isWarmup !== undefined) patch.isWarmup = input.isWarmup;
   if (input.note !== undefined) patch.note = input.note?.trim() || null;
   if (Object.keys(patch).length > 0) {
-    await db.update(workoutSets).set(patch).where(eq(workoutSets.id, input.id));
+    await db
+      .update(workoutSets)
+      .set(patch)
+      .where(
+        and(eq(workoutSets.id, input.id), eq(workoutSets.userId, user.id)),
+      );
   }
   revalidatePath("/gym", "layout");
 }
 
 export async function deleteSet(id: string): Promise<void> {
   if (!id) throw new Error("id required");
-  await db.delete(workoutSets).where(eq(workoutSets.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(workoutSets)
+    .where(and(eq(workoutSets.id, id), eq(workoutSets.userId, user.id)));
   revalidatePath("/gym", "layout");
 }
 
-// Silence unused imports
 void inArray;
 void isNull;
 
@@ -464,10 +542,11 @@ export async function fetchGymMonthStatus(
     { hadWorkout: boolean; splitId: string | null; volume: number; setCount: number }
   >
 > {
+  const { user } = await requireUser();
   const startOfMonth = `${monthKeyOf(monthAnchor)}-01`;
   const start = addDays(startOfMonth, -7);
   const nextMonth = shiftMonth(startOfMonth, 1);
   const endOfMonth = addDays(nextMonth, -1);
   const end = addDays(endOfMonth, 7);
-  return getGymMonthStatus(start, end);
+  return getGymMonthStatus(user.id, start, end);
 }

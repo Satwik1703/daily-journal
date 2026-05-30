@@ -7,6 +7,7 @@ import {
 import { getActiveCategories } from "@/db/queries/pomodoro-categories";
 import { getActiveBooks, getActiveBookId } from "@/db/queries/books";
 import { formatLocalYMD, isValidDateString } from "@/lib/dates";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export async function GET(
   if (!isValidDateString(date)) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
+  const session = await getCurrentUser();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.user.id;
 
   const [
     snapshot,
@@ -27,12 +31,12 @@ export async function GET(
     readingBooks,
     activeBookId,
   ] = await Promise.all([
-    getHabitsSnapshot({ anchor: date, windowDays: 15 }),
-    getActiveCategories(),
-    getValueLogsOnDate(date),
-    getXpByHabit(),
-    getActiveBooks(),
-    getActiveBookId(),
+    getHabitsSnapshot(userId, { anchor: date, windowDays: 15 }),
+    getActiveCategories(userId),
+    getValueLogsOnDate(userId, date),
+    getXpByHabit(userId),
+    getActiveBooks(userId),
+    getActiveBookId(userId),
   ]);
 
   // Lifespan filter applies to both lists; weekday-mask filter only to the

@@ -68,12 +68,12 @@ export function GoalCardMilestone({
     startTransition(() => {
       applyOptimistic({
         kind: "add",
-        item: { id, goalId: goal.id, text, done: false, position: 0 },
+        item: { id, userId: goal.userId, goalId: goal.id, text, done: false, position: 0 },
       });
     });
     setItems((arr) => [
       ...arr,
-      { id, goalId: goal.id, text, done: false, position: arr.length },
+      { id, userId: goal.userId, goalId: goal.id, text, done: false, position: arr.length },
     ]);
     void mutate("add_checklist_item", { id, goalId: goal.id, text });
     setNewText("");

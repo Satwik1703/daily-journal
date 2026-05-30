@@ -2,11 +2,12 @@
 
 import { db } from "@/db/client";
 import { pomodoroSessions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { isValidDateString, formatLocalYMD } from "@/lib/dates";
 import { isActiveCategory } from "@/db/queries/pomodoro-categories";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_DESC_LEN = 2000;
 const MIN_DURATION = 1;
@@ -50,6 +51,7 @@ export async function createSession(input: {
   description?: string | null;
   source: "timer" | "manual" | "partial";
 }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const startedAt = sanitizeTimestamp(input.startedAt, "startedAt");
   const endedAt = sanitizeTimestamp(input.endedAt, "endedAt");
   if (endedAt.getTime() < startedAt.getTime())
@@ -63,7 +65,7 @@ export async function createSession(input: {
 
   let categoryId: string | null = null;
   if (input.categoryId) {
-    if (!(await isActiveCategory(input.categoryId)))
+    if (!(await isActiveCategory(user.id, input.categoryId)))
       throw new Error("Category not found or archived");
     categoryId = input.categoryId;
   }
@@ -76,6 +78,7 @@ export async function createSession(input: {
   const id = input.id ?? nanoid(12);
   await db.insert(pomodoroSessions).values({
     id,
+    userId: user.id,
     date,
     startedAt,
     endedAt,
@@ -97,6 +100,7 @@ export async function updateSession(input: {
   categoryId?: string | null;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
 
   if (input.description !== undefined)
@@ -106,7 +110,7 @@ export async function updateSession(input: {
     if (input.categoryId === null) {
       patch.categoryId = null;
     } else {
-      if (!(await isActiveCategory(input.categoryId)))
+      if (!(await isActiveCategory(user.id, input.categoryId)))
         throw new Error("Category not found or archived");
       patch.categoryId = input.categoryId;
     }
@@ -116,14 +120,24 @@ export async function updateSession(input: {
   await db
     .update(pomodoroSessions)
     .set(patch)
-    .where(eq(pomodoroSessions.id, input.id));
+    .where(
+      and(
+        eq(pomodoroSessions.id, input.id),
+        eq(pomodoroSessions.userId, user.id),
+      ),
+    );
   revalidatePath("/pomodoro", "layout");
   revalidatePath("/insights");
 }
 
 export async function deleteSession(id: string): Promise<void> {
   if (!id) throw new Error("id is required");
-  await db.delete(pomodoroSessions).where(eq(pomodoroSessions.id, id));
+  const { user } = await requireUser();
+  await db
+    .delete(pomodoroSessions)
+    .where(
+      and(eq(pomodoroSessions.id, id), eq(pomodoroSessions.userId, user.id)),
+    );
   revalidatePath("/pomodoro", "layout");
   revalidatePath("/insights");
 }

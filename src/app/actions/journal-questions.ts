@@ -2,10 +2,11 @@
 
 import { db } from "@/db/client";
 import { journalQuestions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { nextQuestionPosition } from "@/db/queries/journal-questions";
+import { requireUser } from "@/lib/auth/context";
 
 const MAX_LABEL_LEN = 140;
 const TYPES = ["text", "scale", "boolean"] as const;
@@ -27,11 +28,14 @@ function sanitizeType(raw: unknown): QType {
 }
 
 export async function createQuestion(input: { id?: string; label: string; type: string }): Promise<{ id: string }> {
+  const { user } = await requireUser();
   const label = sanitizeLabel(input.label);
   const type = sanitizeType(input.type);
   const id = input.id ?? nanoid(12);
-  const position = await nextQuestionPosition();
-  await db.insert(journalQuestions).values({ id, label, type, position });
+  const position = await nextQuestionPosition(user.id);
+  await db
+    .insert(journalQuestions)
+    .values({ id, userId: user.id, label, type, position });
   revalidatePath("/settings");
   revalidatePath("/journal", "layout");
   return { id };
@@ -43,37 +47,51 @@ export async function updateQuestion(input: {
   type?: string;
 }): Promise<void> {
   if (!input.id) throw new Error("id is required");
+  const { user } = await requireUser();
   const patch: Record<string, unknown> = {};
   if (input.label !== undefined) patch.label = sanitizeLabel(input.label);
   if (input.type !== undefined) patch.type = sanitizeType(input.type);
   if (Object.keys(patch).length === 0) return;
-  await db.update(journalQuestions).set(patch).where(eq(journalQuestions.id, input.id));
+  await db
+    .update(journalQuestions)
+    .set(patch)
+    .where(
+      and(
+        eq(journalQuestions.id, input.id),
+        eq(journalQuestions.userId, user.id),
+      ),
+    );
   revalidatePath("/settings");
   revalidatePath("/journal", "layout");
 }
 
 export async function archiveQuestion(id: string): Promise<void> {
+  const { user } = await requireUser();
   await db
     .update(journalQuestions)
     .set({ archivedAt: new Date() })
-    .where(eq(journalQuestions.id, id));
+    .where(
+      and(eq(journalQuestions.id, id), eq(journalQuestions.userId, user.id)),
+    );
   revalidatePath("/settings");
   revalidatePath("/journal", "layout");
 }
 
 export async function unarchiveQuestion(id: string): Promise<void> {
-  await db.update(journalQuestions).set({ archivedAt: null }).where(eq(journalQuestions.id, id));
+  const { user } = await requireUser();
+  await db
+    .update(journalQuestions)
+    .set({ archivedAt: null })
+    .where(
+      and(eq(journalQuestions.id, id), eq(journalQuestions.userId, user.id)),
+    );
   revalidatePath("/settings");
   revalidatePath("/journal", "layout");
 }
 
-/**
- * Persist a new ordering for active daily questions. The array index becomes
- * the `position` value. Validates that every id is a non-empty string but
- * does not assert membership in the active set — orphaned ids no-op.
- */
 export async function reorderQuestions(orderedIds: string[]): Promise<void> {
   if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  const { user } = await requireUser();
   const seen = new Set<string>();
   for (const id of orderedIds) {
     if (typeof id !== "string" || !id) throw new Error("invalid id in orderedIds");
@@ -85,7 +103,12 @@ export async function reorderQuestions(orderedIds: string[]): Promise<void> {
       await tx
         .update(journalQuestions)
         .set({ position: i })
-        .where(eq(journalQuestions.id, orderedIds[i]));
+        .where(
+          and(
+            eq(journalQuestions.id, orderedIds[i]),
+            eq(journalQuestions.userId, user.id),
+          ),
+        );
     }
   });
   revalidatePath("/settings");

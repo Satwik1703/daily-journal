@@ -1339,6 +1339,85 @@ Big bundle that closes a year's worth of "deferred to X.1+" notes plus drops two
 
 ---
 
+## ✅ Phase 12 — Multi-user login (floating-tile + emoji passphrase + recovery)
+
+Plan: `C:\Users\Admin\.claude\plans\okay-now-let-s-work-cosmic-crescent.md`. Six parts (A–F) shipped in one session 2026-05-30.
+
+### Schema migrations 0011 → 0013
+
+- **0011 `auth_tables`** — `users` (name 1-6 chars lowercased-unique, salted SHA-256 passhash, honeypot emoji, tile style cols, recovery_strokes_json), `sessions` (14-day sliding TTL), `login_attempts` (3-fail-hint rolling window). Auto-seeded `u_satwik_seed_001` (`name = 'satwik'`) with NULL passhash so first login captures it.
+- **0012 `user_scoping`** — `user_id` column on all 17 data tables, backfilled to `u_satwik_seed_001` for every pre-existing row. `journal_entries` + `settings` rebuilt with composite PKs `(user_id, date)` / `(user_id, key)`. Per-user index on every table. New `users.passphrase_hint_emoji` (revealed after 3 fails in 10min). Reads + writes everywhere now scoped via `requireUser()`.
+- **0013 `recovery`** — `users.is_owner` (`= 1` for satwik), `login_attempts.kind` enum (`login | recovery_doodle | recovery_code`) partitions throttle counters, new `recovery_codes` table (`code_hash`, `expires_at`, `used_at`, FK to `target_user_id` + `issued_by_user_id`).
+
+### Auth foundation
+
+- `src/lib/auth/{cookie,passphrase,session,context,emoji-grid,tile-style,seed-new-user,recovery-stroke}.ts` — all server-side / client-safe split.
+- `src/middleware.ts` — gates everything except `/auth/*`, `/_next/*`, PWA shells. Edge-safe cookie-presence check; real session validation in `requireUser()` at the page / action level so `@libsql/client/node` never lands in middleware.
+- `src/lib/auth/passphrase.ts` — `crypto.subtle` SHA-256 over `passphrase[].join("|") + salt`. `comparePassphrase` uses `timingSafeEqual`.
+- `src/lib/auth/session.ts` — `createSession`, `readSessionAndUser` (auto-prunes expired), `refreshSessionIfStale` (24h grace window), `destroySession`, plus the recovery cookie family (`createRecoverySession`, `readRecoverySession`, `destroyRecoverySession`) — HMAC-SHA256 signed with `RECOVERY_SECRET` env var (falls back to a dev constant if unset).
+- `src/app/actions/auth.ts` — `signupUser` (now requires recovery doodle + accepts tile style + creates session + auto-seeds defaults), `loginUser` (null-passhash bootstrap path, honeypot rejection, 3-fail hint), `logoutUser`, `listMySessions` / `renameSession` / `destroySessionById` / `setDeviceNickname` (devices card), plus the recovery actions (`startDoodleRecovery`, `issueRecoveryCode`, `redeemRecoveryCode`, `resetPassphraseAndComplete`, `listFriendsForOwnerRecovery`, `userHasDoodle`, `requireOwner` helper).
+
+### Floating UI
+
+- `/auth/login` → `<FloatingRoster>` with `requestAnimationFrame` physics. Tiles drift, bounce off viewport edges, repel from cursor / touch (force `(100 − dist) * 0.002`). Aura glow proportional to recency (`1 − min(daysSinceLastSeen / 14, 1)`). Tap a tile → tile zooms to center → `<EmojiPassphraseGrid>` appears under it. 24-emoji × 4-category carousel (Animals / Food / Nature / Things). 4-slot capture row. Wrong combo → red shake, picked emojis cleared. Right combo → `canvas-confetti` burst (`particleCount: 80, spread: 60`) then `/journal` redirect. 3 fails → first emoji of stored passphrase fades into slot 1.
+- `/auth/signup` → 4-step ritual via `<SignupRitual>`:
+  1. Name (6-char cap, live availability check w/ `✨` / shake)
+  2. Style (12 gradient swatches + 4 fonts + 4 borders, live `<UserTile>` preview)
+  3. Lock — substep 1 = passphrase (Next enables on 4 picks), substep 2 = honeypot (Next enables on pick)
+  4. Doodle (`<DoodleCanvas>` 240×240, multi-stroke, pointer events) — **mandatory**, client + server enforce non-empty strokes
+- `/more` — your tile + Sign out + Switch user (`/auth/switch` destroys session and redirects to roster).
+
+### Recovery (Part F)
+
+Two redundant unlock paths sharing the same throttle counter (5 wrong / user / hour combined).
+
+1. **Doodle (self-serve).** Strokes resampled to 64 arc-length-even points, normalized to unit bounding box, compared against the saved JSON via DTW (band=8, threshold 0.85). Lives in `src/lib/auth/recovery-stroke.ts`. `/auth/recover/doodle?name=X` renders the same `<DoodleCanvas>` from signup. Match → recovery cookie (30 min, HMAC-signed) → `/auth/reset-passphrase`.
+2. **Owner code.** Owner-only Settings card (`<OwnerRecoveryCard>`) lists all non-owner users w/ their tiles. Tap a friend → `issueRecoveryCode` server action generates 6-digit code, SHA-256 hashes with target's id as salt, stores in `recovery_codes` w/ 30-min TTL (deletes any prior unused code for the same user in the same transaction so only the latest works), returns plaintext **once** in a Dialog with Copy button. Friend types code at `/auth/recover/code?name=X` → match → recovery cookie → reset.
+
+Reset screen (`/auth/reset-passphrase`) — recovery cookie required server-side. Re-uses the Lock-card UI: 4-emoji picker → honeypot picker. Submit replaces `passhash` / `salt` / `honeypotEmoji` / `passphraseHintEmoji`, creates a real session (auto-login), confetti, redirect.
+
+Per-user auto-seed on new signup (`src/lib/auth/seed-new-user.ts`) — drops 6 default pomo categories + 4 default journal questions for any new user (satwik already has full data from migrations).
+
+### Data wall
+
+- Every query in `src/db/queries/*.ts` (~20 modules) takes `userId` as first arg and filters every base read by `eq(table.userId, userId)`.
+- Every server action in `src/app/actions/*.ts` (~15 files / ~40 mutation kinds) starts with `const { user } = await requireUser()` and threads `user.id` through inserts + where clauses.
+- Every `/api/page/*` route + `/api/sync` calls `getCurrentUser()`, returns 401 on no session, then forwards `userId` to queries.
+- IDB namespaced per user — `src/lib/sync/db.ts` opens `habit_log_sync_u{uid}`. UID mirror in `localStorage` (`__habit_log_uid`) set on login/signup, cleared on logout. On user-switch the cached DB connection is closed and re-opened with the new name.
+- PWA shell bumped `habit-log-v13 → v15` — `SHELL` array now includes `/auth/login`, `/auth/signup`, `/auth/recover`, `/auth/reset-passphrase`.
+
+### Same-session polish
+
+- `src/app/gym/[date]/_components/set-row.tsx` — fixed mid-typing clobber after `addSet → log_set → refetch`. Stepper's `useEffect` now seeds the input draft only on the `editing` false→true transition (drops `value` from deps); `valueRef` tracks latest for commit fallback without re-render. New `onEdit` prop bubbles up to `dirtySetIdsRef` on every click / keystroke so the gym-page-client merge keeps the local row even when the user hasn't committed yet. Reps stepper now snaps through a ladder `[0, 5, 8, 10, 12, 15, 20]` (free entry preserves arbitrary values).
+- `src/app/manifest.ts` — dropped dynamic per-category shortcuts (manifest is loaded by the OS without auth context; categories are per-user now and can't be resolved without a session).
+
+### Deferred (still in 12.G+ backlog)
+
+- Constellation lines on 5s idle login screen.
+- Ambient stat ticker rotating bottom strip.
+- Welcome-ripple animation on signup success.
+- Streak-based tile sizing (needs per-user journal streak query in `listAllUsersForLoginScreen`).
+- QR device transfer, magic-link relogin URL, stealth-hide tile, etc. (carried over from 12.F+).
+
+### Deploy
+
+1. `RECOVERY_SECRET` 32-byte hex generated and added to `.env.local` + `.env.production.local`. **Also set on Vercel production** before this deploy.
+2. Migrations `0011 → 0013` applied to prod Turso (`daily-journal-satwik1703.aws-ap-south-1.turso.io`) via `npm run db:migrate` with `.env.production.local` loaded. `0012` rebuilds `journal_entries` + `settings`; the table-rebuild dance is committed as-is in the migration SQL and survives Turso replay.
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. PWA: `habit-log-v15` activates on next SW lifecycle. Installed phones re-fetch the new shell + `/auth/*` cache entries.
+
+### Browser-test checklist (post-deploy)
+
+- Cold device → `/anything` → middleware redirects to `/auth/login` → tile roster floating, satwik tile visible
+- First sign in as satwik with any 4 emojis → null-passhash bootstrap captures it → `/journal` w/ all existing data
+- Sign up a friend via 4-step ritual (doodle mandatory) → friend sees empty `/journal` + default pomo cats / journal questions
+- Owner code path: satwik → Settings → "Reset a friend's passphrase" card → 6-digit code → friend goes to `/auth/recover` → code path → reset → friend logged in
+- Doodle recovery: friend draws their signup squiggle on `/auth/recover/doodle?name=X` → matches → reset
+- Gym set row: open exercise card → "Add set" → instantly tap the reps number → type fast → confirm value stays
+- Reps stepper +/- cycles through `0 → 5 → 8 → 10 → 12 → 15 → 20`
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

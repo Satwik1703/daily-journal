@@ -1,81 +1,71 @@
 import { db } from "@/db/client";
 import { pomodoroCategories } from "@/db/schema";
-import { asc, isNotNull, isNull, eq, and } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { DEFAULT_CATEGORIES } from "@/lib/pomodoro-meta";
+import { and, asc, isNotNull, isNull, eq } from "drizzle-orm";
 
 export type PomoCategory = typeof pomodoroCategories.$inferSelect;
 
-let didSeedCheck = false;
-
-/** Seeds the default categories on first read if the table is empty. */
-async function ensureSeeded(): Promise<void> {
-  if (didSeedCheck) return;
-  const rows = await db
-    .select({ id: pomodoroCategories.id })
-    .from(pomodoroCategories)
-    .limit(1);
-  if (rows.length === 0) {
-    const values = DEFAULT_CATEGORIES.map((c, i) => ({
-      id: nanoid(12),
-      name: c.name,
-      emoji: c.emoji,
-      color: c.color,
-      position: i,
-    }));
-    await db.insert(pomodoroCategories).values(values);
-  }
-  didSeedCheck = true;
-}
-
-export async function getActiveCategories(): Promise<PomoCategory[]> {
-  await ensureSeeded();
+export async function getActiveCategories(userId: string): Promise<PomoCategory[]> {
   return db
     .select()
     .from(pomodoroCategories)
-    .where(isNull(pomodoroCategories.archivedAt))
+    .where(
+      and(eq(pomodoroCategories.userId, userId), isNull(pomodoroCategories.archivedAt)),
+    )
     .orderBy(asc(pomodoroCategories.position), asc(pomodoroCategories.createdAt));
 }
 
-export async function getArchivedCategories(): Promise<PomoCategory[]> {
-  await ensureSeeded();
+export async function getArchivedCategories(userId: string): Promise<PomoCategory[]> {
   return db
     .select()
     .from(pomodoroCategories)
-    .where(isNotNull(pomodoroCategories.archivedAt))
+    .where(
+      and(eq(pomodoroCategories.userId, userId), isNotNull(pomodoroCategories.archivedAt)),
+    )
     .orderBy(asc(pomodoroCategories.archivedAt));
 }
 
-export async function getAllCategories(): Promise<PomoCategory[]> {
-  await ensureSeeded();
+export async function getAllCategories(userId: string): Promise<PomoCategory[]> {
   return db
     .select()
     .from(pomodoroCategories)
+    .where(eq(pomodoroCategories.userId, userId))
     .orderBy(asc(pomodoroCategories.position), asc(pomodoroCategories.createdAt));
 }
 
-export async function findCategoryById(id: string): Promise<PomoCategory | null> {
+export async function findCategoryById(
+  userId: string,
+  id: string,
+): Promise<PomoCategory | null> {
   const rows = await db
     .select()
     .from(pomodoroCategories)
-    .where(eq(pomodoroCategories.id, id))
+    .where(
+      and(eq(pomodoroCategories.userId, userId), eq(pomodoroCategories.id, id)),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function isActiveCategory(id: string): Promise<boolean> {
+export async function isActiveCategory(userId: string, id: string): Promise<boolean> {
   const rows = await db
     .select({ id: pomodoroCategories.id })
     .from(pomodoroCategories)
-    .where(and(eq(pomodoroCategories.id, id), isNull(pomodoroCategories.archivedAt)))
+    .where(
+      and(
+        eq(pomodoroCategories.userId, userId),
+        eq(pomodoroCategories.id, id),
+        isNull(pomodoroCategories.archivedAt),
+      ),
+    )
     .limit(1);
   return rows.length > 0;
 }
 
-export async function nextCategoryPosition(): Promise<number> {
+export async function nextCategoryPosition(userId: string): Promise<number> {
   const all = await db
     .select({ position: pomodoroCategories.position })
-    .from(pomodoroCategories);
+    .from(pomodoroCategories)
+    .where(eq(pomodoroCategories.userId, userId));
   if (all.length === 0) return 0;
   return Math.max(...all.map((r) => r.position)) + 1;
 }

@@ -10,6 +10,7 @@ import {
 } from "@/db/queries/goals";
 import { getActiveHabits } from "@/db/queries/habits";
 import { getActiveCategories } from "@/db/queries/pomodoro-categories";
+import { getCurrentUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -33,25 +34,28 @@ export async function GET(
   if (!isValidPeriodKey(anchor, period)) {
     return NextResponse.json({ error: "Invalid anchor" }, { status: 400 });
   }
+  const session = await getCurrentUser();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.user.id;
 
   const { start, end } = periodRangeFor(anchor, period);
 
   const [goalsForPeriod, habitOptions, pomoCategories, history, archivedGoals] = await Promise.all([
-    getGoalsForPeriod(period, anchor),
-    getActiveHabits(),
-    getActiveCategories(),
-    getGoalsHistory(period, anchor, 5),
-    getArchivedGoalsForPeriod(period, anchor),
+    getGoalsForPeriod(userId, period, anchor),
+    getActiveHabits(userId),
+    getActiveCategories(userId),
+    getGoalsHistory(userId, period, anchor, 5),
+    getArchivedGoalsForPeriod(userId, period, anchor),
   ]);
 
   const yearHeatmap =
-    period === "year" ? await getGoalsYearHeatmap(Number(anchor)) : null;
+    period === "year" ? await getGoalsYearHeatmap(userId, Number(anchor)) : null;
 
   const childrenByParent: Record<string, unknown> =
     period !== "week"
       ? Object.fromEntries(
           await Promise.all(
-            goalsForPeriod.map(async (g) => [g.id, await getChildrenOfGoal(g.id)] as const),
+            goalsForPeriod.map(async (g) => [g.id, await getChildrenOfGoal(userId, g.id)] as const),
           ),
         )
       : {};
