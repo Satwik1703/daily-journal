@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, ClipboardList, Search } from "lucide-react";
 import { nanoid } from "nanoid";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import { ViewModeMenu, type RenderMode } from "./view-mode-menu";
 import { CalendarView } from "./calendar-view";
 import { KanbanView } from "./kanban-view";
 import { EisenhowerView } from "./eisenhower-view";
+import { TimelineView } from "./timeline-view";
 
 const EMPTY_COUNTS = { today: 0, tomorrow: 0, next7: 0, inbox: 0, all: 0, byList: {} };
 
@@ -104,6 +105,34 @@ export function TodoClient({ view }: { view: string }) {
     setHidden(new Set());
     setStatusOverride(new Map());
     setReorderIds(null);
+  }, [view]);
+
+  // Desktop keyboard shortcuts. Ignored while typing in a field (Esc still blurs).
+  const quickAddRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (e.key === "Escape" && typing) {
+        (el as HTMLElement).blur();
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        setSearchOpen(true);
+      } else if (e.key === "n") {
+        e.preventDefault();
+        quickAddRef.current?.focus();
+      } else if (e.key >= "1" && e.key <= "5") {
+        const modes = ["list", "calendar", "kanban", "eisenhower", "timeline"] as const;
+        changeMode(modes[Number(e.key) - 1]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   // Reconcile overlays against fresh server data.
@@ -310,7 +339,7 @@ export function TodoClient({ view }: { view: string }) {
       </div>
 
       {!isCompleted ? (
-        <QuickAdd today={today} lists={lists} onSubmit={handleAdd} />
+        <QuickAdd today={today} lists={lists} onSubmit={handleAdd} inputRef={quickAddRef} />
       ) : null}
 
       {data == null ? (
@@ -325,6 +354,8 @@ export function TodoClient({ view }: { view: string }) {
         <KanbanView todos={visible} today={today} onOpen={openDetail} onSetPriority={handlePriority} />
       ) : effectiveMode === "eisenhower" ? (
         <EisenhowerView todos={visible} today={today} onOpen={openDetail} />
+      ) : effectiveMode === "timeline" ? (
+        <TimelineView todos={visible} today={today} onOpen={openDetail} />
       ) : isList ? (
         visible.length === 0 && sections.length === 0 ? (
           <>

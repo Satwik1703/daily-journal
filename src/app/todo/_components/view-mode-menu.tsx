@@ -1,6 +1,6 @@
 "use client";
 
-import { List, CalendarDays, Columns3, Grid2x2, Check } from "lucide-react";
+import { List, CalendarDays, Columns3, Grid2x2, GanttChart, Check } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -9,13 +9,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
-export type RenderMode = "list" | "calendar" | "kanban" | "eisenhower";
+export type RenderMode = "list" | "calendar" | "kanban" | "eisenhower" | "timeline";
 
 const MODES: { key: RenderMode; label: string; Icon: typeof List }[] = [
   { key: "list", label: "List", Icon: List },
   { key: "calendar", label: "Calendar", Icon: CalendarDays },
   { key: "kanban", label: "Board", Icon: Columns3 },
   { key: "eisenhower", label: "Matrix", Icon: Grid2x2 },
+  { key: "timeline", label: "Timeline", Icon: GanttChart },
 ];
 
 export function ViewModeMenu({

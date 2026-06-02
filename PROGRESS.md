@@ -1574,7 +1574,17 @@ Client-only render modes over the current view's todo set — **no schema/DB cha
 
 **Verified local:** tsc clean · lint 0 errors · build clean.
 
-**Parts remaining (planned):** 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
+### ✅ Part 6 — Timeline view + keyboard shortcuts (committed, local only)
+
+Client-only — no schema change.
+
+- **TimelineView:** 5th render mode (added to `ViewModeMenu`). Horizontally-scrolling day strip — Overdue column + Today..+14 + a No-date column — each listing its due tasks (priority dot + time). Tap → detail. (Todos are points, not ranges; reads as a horizontal agenda. Duration-bar Gantt deferred until todos gain a duration field.)
+- **Keyboard shortcuts** (desktop): `/` open search · `n` focus quick-add · `1`–`5` switch render mode (List/Calendar/Board/Matrix/Timeline) · `Esc` blur a focused field. Ignored while typing.
+- **Pomodoro integration deferred** — it crosses into the `/pomodoro` subsystem; left for a later focused pass rather than half-wiring it here.
+
+**Verified local:** tsc clean · lint 0 errors · build clean.
+
+**Parts remaining (planned):** 7 filters (advanced AND/OR) + swipe + bulk · 8 pomodoro integration + web push reminders (optional).
 
 ---
 

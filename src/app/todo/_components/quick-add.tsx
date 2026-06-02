@@ -12,11 +12,13 @@ export function QuickAdd({
   lists,
   placeholder = "Add a task…  try \"pay rent !high tomorrow 6pm\"",
   onSubmit,
+  inputRef,
 }: {
   today: DateString;
   lists: TodoList[];
   placeholder?: string;
   onSubmit: (text: string) => void;
+  inputRef?: React.Ref<HTMLInputElement>;
 }) {
   const [text, setText] = useState("");
   const parsed = text.trim() ? parseQuickAdd(text, today) : null;
@@ -36,6 +38,7 @@ export function QuickAdd({
       <div className="flex items-center gap-2 px-3 py-2">
         <Plus className="size-4 shrink-0 text-muted-foreground" />
         <input
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
