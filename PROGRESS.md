@@ -1484,6 +1484,35 @@ The opaque "Failed query" hid the real SQLite reason: **`foreign key mismatch - 
 
 ---
 
+## ✅ Phase 13 — Default gym setup for new users (live-copy from owner)
+
+Plan: `C:\Users\Admin\.claude\plans\okay-now-as-part-cozy-kettle.md`. Shipped 2026-06-02.
+
+### Problem
+New users (friends who sign up) landed on an **empty Gym tab** — gym entities are per-user (scoped since Phase 12's data wall) and `seedNewUser` only seeded pomodoro categories + journal questions. Every new user had to hand-build a routine before logging a workout.
+
+### Fix — code-only, no migration
+`src/lib/auth/seed-new-user.ts` — new `cloneOwnerGym(userId)` runs after the existing pomo/journal seeds in `seedNewUser` (called once from `signupUser`):
+- Resolves the owner via `users.isOwner`; skips if no owner or `ownerId === userId`.
+- Reuses `getAllSplitsWithExercises(ownerId)` (`src/db/queries/gym.ts`) — non-archived splits/exercises/joins, `muscleGroups` already parsed.
+- Remaps owner ids → fresh `nanoid(12)` (`oldSplitId→new`, `oldExerciseId→new`), inserts `splits` / `exercises` / `split_exercises` scoped to the new `userId`. Preserves name/emoji/color/position/muscleGroups/notes/perHand. Filters out links whose split or exercise wasn't copied (orphan-FK guard).
+- All three inserts wrapped in `db.transaction` (all-or-nothing) inside a `try/catch` — gym is non-critical, a clone failure is logged and swallowed so it never fails signup or strands a half-created account.
+
+**Live-copy, not a frozen snapshot:** always mirrors the owner's current gym, so future signups inherit any routine changes automatically. **New signups only** — no backfill of existing accounts (per user decision).
+
+### Verification
+- `npx tsc --noEmit` clean · `npm run lint` 0 errors (44 pre-existing warnings) · `npm run build` clean (24 routes).
+- Clone data test on local.db with a throwaway user: 5 splits / 26 exercises / 27 links cloned, 0 id collisions with owner, `foreign_key_check` 0 violations, owner gym untouched, `ON DELETE cascade` cleanup confirmed.
+- User signed off on a real browser signup (gym populated, settings config correct, owner unchanged).
+
+### Deploy
+1. `git push origin main`.
+2. **No `db:migrate`** (code-only, reuses existing tables). PWA shell stays `habit-log-v15`.
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. Prod owner already has 5 splits / 26 exercises, so the next prod signup clones a full gym immediately.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
