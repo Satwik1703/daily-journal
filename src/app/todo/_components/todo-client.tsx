@@ -27,6 +27,10 @@ import { ListFormDialog } from "./list-form-dialog";
 import { TagFormDialog } from "./tag-form-dialog";
 import { SortMenu } from "./sort-menu";
 import { SearchSheet } from "./search-sheet";
+import { ViewModeMenu, type RenderMode } from "./view-mode-menu";
+import { CalendarView } from "./calendar-view";
+import { KanbanView } from "./kanban-view";
+import { EisenhowerView } from "./eisenhower-view";
 
 const EMPTY_COUNTS = { today: 0, tomorrow: 0, next7: 0, inbox: 0, all: 0, byList: {} };
 
@@ -56,6 +60,25 @@ export function TodoClient({ view }: { view: string }) {
   const [editingTag, setEditingTag] = useState<TodoTag | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [sort, setSort] = useState<TodoSort>("manual");
+  const [mode, setMode] = useState<RenderMode>("list");
+
+  // Per-view render mode, persisted in localStorage.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`todo-mode:${view}`);
+      setMode(saved ? (saved as RenderMode) : "list");
+    } catch {
+      setMode("list");
+    }
+  }, [view]);
+  const changeMode = (m: RenderMode) => {
+    setMode(m);
+    try {
+      localStorage.setItem(`todo-mode:${view}`, m);
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Per-view sort, persisted in localStorage.
   useEffect(() => {
@@ -123,6 +146,7 @@ export function TodoClient({ view }: { view: string }) {
   const isCompleted = target?.kind === "smart" && target.view === "completed";
   const isList = target?.kind === "list";
   const sections = data?.sections ?? [];
+  const effectiveMode: RenderMode = isCompleted ? "list" : mode;
 
   // Compose the visible todo list from server data + overlays.
   const visible = useMemo(() => {
@@ -281,7 +305,8 @@ export function TodoClient({ view }: { view: string }) {
         <Button size="icon-sm" variant="ghost" aria-label="Search" onClick={() => setSearchOpen(true)}>
           <Search />
         </Button>
-        <SortMenu value={sort} onChange={changeSort} />
+        {!isCompleted ? <ViewModeMenu value={mode} onChange={changeMode} /> : null}
+        {effectiveMode === "list" ? <SortMenu value={sort} onChange={changeSort} /> : null}
       </div>
 
       {!isCompleted ? (
@@ -294,6 +319,12 @@ export function TodoClient({ view }: { view: string }) {
           <div className="h-14 animate-pulse rounded-lg bg-muted/40" />
           <div className="h-14 animate-pulse rounded-lg bg-muted/40" />
         </div>
+      ) : effectiveMode === "calendar" ? (
+        <CalendarView todos={visible} today={today} onOpen={openDetail} />
+      ) : effectiveMode === "kanban" ? (
+        <KanbanView todos={visible} today={today} onOpen={openDetail} onSetPriority={handlePriority} />
+      ) : effectiveMode === "eisenhower" ? (
+        <EisenhowerView todos={visible} today={today} onOpen={openDetail} />
       ) : isList ? (
         visible.length === 0 && sections.length === 0 ? (
           <>

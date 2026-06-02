@@ -1564,7 +1564,17 @@ Offline-first todo manager: lists + Inbox, smart lists, quick-add NLP, prioritie
 
 **Verified local:** tsc clean · lint 0 errors · build clean · parser 15/15 · recurrence 12/12 · DB smoke (completion log + cascade on todo delete, 0 FK violations).
 
-**Parts remaining (planned):** 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
+### ✅ Part 5 — Views: Calendar · Kanban · Eisenhower (committed, local only)
+
+Client-only render modes over the current view's todo set — **no schema/DB change**. Header `ViewModeMenu` (List/Calendar/Board/Matrix); chosen mode persisted per-view in `localStorage` (`todo-mode:<view>`). Sort menu only shows in List mode; Completed view forced to List.
+
+- **CalendarView:** month grid (reuse `monthMatrix`), priority-colored dots per day, tap a day → its tasks below + an Unscheduled group. Tap task → detail. (drag-to-reschedule deferred)
+- **KanbanView:** four priority columns (High/Med/Low/None), `@dnd-kit` drag a card between columns → `update_todo {priority}`. Horizontal scroll; card tap → detail.
+- **EisenhowerView:** 2×2 by urgency (due ≤ tomorrow/overdue) × importance (priority ≥ medium) — Do first / Schedule / Delegate / Later. Tap → detail. (drag-to-set deferred)
+
+**Verified local:** tsc clean · lint 0 errors · build clean.
+
+**Parts remaining (planned):** 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
 
 ---
 
