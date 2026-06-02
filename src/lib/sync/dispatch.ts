@@ -90,6 +90,9 @@ import {
   updateSection,
   deleteSection,
   reorderSections,
+  createFilter,
+  updateFilter,
+  deleteFilter,
 } from "@/app/actions/todo";
 import {
   createSplit,
@@ -237,6 +240,9 @@ export const DISPATCH: Record<string, AnyAction> = {
   update_section: updateSection,
   delete_section: (args: { id: string }) => deleteSection(args.id),
   reorder_sections: reorderSections,
+  create_filter: createFilter,
+  update_filter: updateFilter,
+  delete_filter: (args: { id: string }) => deleteFilter(args.id),
 };
 
 export type MutationKind = keyof typeof DISPATCH;

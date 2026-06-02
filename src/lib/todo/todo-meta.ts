@@ -54,6 +54,14 @@ export interface TodoSection {
   position: number;
 }
 
+export interface TodoFilter {
+  id: string;
+  name: string;
+  color: string;
+  rulesJson: string;
+  position: number;
+}
+
 // ---- Priority ----
 
 export const PRIORITY_META: Record<
@@ -99,7 +107,8 @@ export function isSmartView(v: string): v is SmartView {
 export type ViewTarget =
   | { kind: "smart"; view: SmartView }
   | { kind: "list"; listId: string }
-  | { kind: "tag"; tagId: string };
+  | { kind: "tag"; tagId: string }
+  | { kind: "filter"; filterId: string };
 
 export function parseViewParam(raw: string): ViewTarget | null {
   if (isSmartView(raw)) return { kind: "smart", view: raw };
@@ -110,6 +119,10 @@ export function parseViewParam(raw: string): ViewTarget | null {
   if (raw.startsWith("tag-")) {
     const tagId = raw.slice("tag-".length);
     if (tagId) return { kind: "tag", tagId };
+  }
+  if (raw.startsWith("filter-")) {
+    const filterId = raw.slice("filter-".length);
+    if (filterId) return { kind: "filter", filterId };
   }
   return null;
 }
@@ -138,6 +151,7 @@ export interface TodoPageData {
   tags: TodoTag[];
   tagsByTodo: Record<string, TodoTag[]>;
   sections: TodoSection[]; // sections of the current list (empty for non-list views)
+  filters: TodoFilter[];
   todos: Todo[]; // top-level todos for the view
   subtasks: Record<string, { done: number; total: number }>;
   counts: TodoViewCounts;

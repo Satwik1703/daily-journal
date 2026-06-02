@@ -1,5 +1,5 @@
 import { db } from "@/db/client";
-import { todos, todoLists, todoTags, todoTagLinks, todoSections } from "@/db/schema";
+import { todos, todoLists, todoTags, todoTagLinks, todoSections, todoFilters } from "@/db/schema";
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import type {
   Todo,
@@ -8,6 +8,7 @@ import type {
   TodoListKind,
   TodoTag,
   TodoSection,
+  TodoFilter,
 } from "@/lib/todo/todo-meta";
 
 function rowTodo(r: typeof todos.$inferSelect): Todo {
@@ -268,6 +269,37 @@ export async function nextSectionPosition(userId: string, listId: string): Promi
     .from(todoSections)
     .where(and(eq(todoSections.userId, userId), eq(todoSections.listId, listId)))
     .orderBy(desc(todoSections.position))
+    .limit(1);
+  return (rows[0]?.p ?? -1) + 1;
+}
+
+// ---- Filters ----
+
+export async function getFilters(userId: string): Promise<TodoFilter[]> {
+  const rows = await db
+    .select()
+    .from(todoFilters)
+    .where(eq(todoFilters.userId, userId))
+    .orderBy(asc(todoFilters.position), asc(todoFilters.id));
+  return rows.map((r) => ({ id: r.id, name: r.name, color: r.color, rulesJson: r.rulesJson, position: r.position }));
+}
+
+export async function findFilterById(userId: string, id: string): Promise<TodoFilter | null> {
+  const rows = await db
+    .select()
+    .from(todoFilters)
+    .where(and(eq(todoFilters.id, id), eq(todoFilters.userId, userId)))
+    .limit(1);
+  const r = rows[0];
+  return r ? { id: r.id, name: r.name, color: r.color, rulesJson: r.rulesJson, position: r.position } : null;
+}
+
+export async function nextFilterPosition(userId: string): Promise<number> {
+  const rows = await db
+    .select({ p: todoFilters.position })
+    .from(todoFilters)
+    .where(eq(todoFilters.userId, userId))
+    .orderBy(desc(todoFilters.position))
     .limit(1);
   return (rows[0]?.p ?? -1) + 1;
 }

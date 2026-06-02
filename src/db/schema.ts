@@ -722,3 +722,20 @@ export const todoCompletions = sqliteTable(
   },
   (t) => [index("todo_completions_todo").on(t.todoId)],
 );
+
+// Saved custom filters (Phase 14 Part 7). rulesJson holds the AND/OR rule set.
+export const todoFilters = sqliteTable(
+  "todo_filters",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("#8b5cf6"),
+    rulesJson: text("rules_json").notNull(),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("todo_filters_user").on(t.userId)],
+);

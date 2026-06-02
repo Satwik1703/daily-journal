@@ -1584,7 +1584,16 @@ Client-only — no schema change.
 
 **Verified local:** tsc clean · lint 0 errors · build clean.
 
-**Parts remaining (planned):** 7 filters (advanced AND/OR) + swipe + bulk · 8 pomodoro integration + web push reminders (optional).
+### ✅ Part 7 — Custom filters (advanced AND/OR) (committed, local only)
+
+**Schema** (`0020_todo_filters.sql`, applied local — additive, 0 FK violations): `todo_filters` (id/userId/name/color/rulesJson/position).
+
+- **Eval lib** `src/lib/todo/filters.ts` (pure, unit-tested 13/13 via `scripts/test-filters.ts`): `FilterRules {combinator and|or, conditions[]}`; conditions over fields **list** (is/inbox), **tag** (has), **priority** (is/≥/≤), **due** (overdue/today/next7/none/any/before/after), **keyword** (title+note contains), **status**; `parseFilterRules` validates untrusted input, `evalFilter` applies AND/OR.
+- **Saved filters** as a view `filter-<id>`: the route loads the filter, evaluates over all top-level todos (active **and** completed, so status conditions work). Switcher Filters section (create/edit/navigate); `FilterBuilderDialog` — name + color + All/Any combinator + per-field condition rows (add/remove). Backend `createFilter/updateFilter/deleteFilter` + queries + dispatch + cacheKeys + payload `filters`.
+
+**Verified local:** tsc clean · lint 0 errors · build clean · filters 13/13 · DB smoke (persist + rules roundtrip, 0 FK violations).
+
+**Parts remaining (planned):** 8 bulk actions + swipe gestures · 9 pomodoro integration + web push reminders (optional).
 
 ---
 

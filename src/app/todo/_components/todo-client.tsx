@@ -15,6 +15,7 @@ import {
   type Todo,
   type TodoList,
   type TodoTag,
+  type TodoFilter,
   type TodoPageData,
   type TodoSort,
 } from "@/lib/todo/todo-meta";
@@ -25,6 +26,7 @@ import { TaskDetailSheet } from "./task-detail-sheet";
 import { ViewSwitcher } from "./view-switcher";
 import { ListFormDialog } from "./list-form-dialog";
 import { TagFormDialog } from "./tag-form-dialog";
+import { FilterBuilderDialog } from "./filter-builder-dialog";
 import { SortMenu } from "./sort-menu";
 import { SearchSheet } from "./search-sheet";
 import { ViewModeMenu, type RenderMode } from "./view-mode-menu";
@@ -59,6 +61,8 @@ export function TodoClient({ view }: { view: string }) {
   const [editingList, setEditingList] = useState<TodoList | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<TodoTag | null>(null);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [editingFilter, setEditingFilter] = useState<TodoFilter | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [sort, setSort] = useState<TodoSort>("manual");
   const [mode, setMode] = useState<RenderMode>("list");
@@ -205,12 +209,15 @@ export function TodoClient({ view }: { view: string }) {
   // ----- view meta -----
   const list = target?.kind === "list" ? listsById.get(target.listId) : undefined;
   const tag = target?.kind === "tag" ? (data?.tags ?? []).find((t) => t.id === target.tagId) : undefined;
+  const filter = target?.kind === "filter" ? (data?.filters ?? []).find((f) => f.id === target.filterId) : undefined;
   const title =
     target?.kind === "list"
       ? (list?.name ?? "List")
       : target?.kind === "tag"
         ? `#${tag?.name ?? "tag"}`
-        : (SMART_VIEWS.find((v) => v.key === (target?.kind === "smart" ? target.view : ""))?.label ?? "Todo");
+        : target?.kind === "filter"
+          ? (filter?.name ?? "Filter")
+          : (SMART_VIEWS.find((v) => v.key === (target?.kind === "smart" ? target.view : ""))?.label ?? "Todo");
   const hint =
     target?.kind === "smart"
       ? SMART_VIEWS.find((v) => v.key === target.view)?.hint
@@ -312,7 +319,7 @@ export function TodoClient({ view }: { view: string }) {
   const count =
     target?.kind === "list"
       ? (data?.counts.byList[target.listId] ?? visible.length)
-      : target?.kind === "tag"
+      : target?.kind === "tag" || target?.kind === "filter"
         ? visible.length
         : isCompleted
           ? visible.length
@@ -439,6 +446,17 @@ export function TodoClient({ view }: { view: string }) {
           setSwitcherOpen(false);
           setTagDialogOpen(true);
         }}
+        filters={data?.filters ?? []}
+        onCreateFilter={() => {
+          setEditingFilter(null);
+          setSwitcherOpen(false);
+          setFilterDialogOpen(true);
+        }}
+        onEditFilter={(f) => {
+          setEditingFilter(f);
+          setSwitcherOpen(false);
+          setFilterDialogOpen(true);
+        }}
       />
 
       <ListFormDialog
@@ -448,6 +466,13 @@ export function TodoClient({ view }: { view: string }) {
         folders={lists.filter((l) => l.kind === "folder")}
       />
       <TagFormDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} editing={editingTag} />
+      <FilterBuilderDialog
+        open={filterDialogOpen}
+        onOpenChange={setFilterDialogOpen}
+        editing={editingFilter}
+        lists={lists}
+        tags={data?.tags ?? []}
+      />
       <SearchSheet open={searchOpen} onOpenChange={setSearchOpen} onPick={openDetail} />
 
       <TaskDetailSheet

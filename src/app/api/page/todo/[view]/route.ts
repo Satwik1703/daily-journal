@@ -9,8 +9,11 @@ import {
   getTagsByTodo,
   getTodoIdsForTag,
   getSectionsForList,
+  getFilters,
+  findFilterById,
 } from "@/db/queries/todo";
 import { addDays, todayLocal } from "@/lib/dates";
+import { parseFilterRules, evalFilter } from "@/lib/todo/filters";
 import {
   parseViewParam,
   todoMatchesSmartView,
@@ -37,12 +40,13 @@ export async function GET(
   const tomorrow = addDays(today, 1);
   const next7End = addDays(today, 6);
 
-  const [lists, active, subtasks, tags, tagsByTodo] = await Promise.all([
+  const [lists, active, subtasks, tags, tagsByTodo, filters] = await Promise.all([
     getLists(userId),
     getActiveTodos(userId),
     getSubtaskCounts(userId),
     getTags(userId),
     getTagsByTodo(userId),
+    getFilters(userId),
   ]);
 
   // Top-level active todos drive the main list + all counts.
@@ -71,6 +75,19 @@ export async function GET(
   } else if (target.kind === "tag") {
     const ids = await getTodoIdsForTag(userId, target.tagId);
     viewTodos = topActive.filter((t) => ids.has(t.id));
+  } else if (target.kind === "filter") {
+    const filter = await findFilterById(userId, target.filterId);
+    const rules = filter ? parseFilterRules(filter.rulesJson) : null;
+    if (!rules) {
+      viewTodos = [];
+    } else {
+      // Filters can match completed/won't-do too (status conditions), so
+      // evaluate over the full top-level set.
+      const completed = await getCompletedTodos(userId, 500);
+      const all = [...topActive, ...completed.filter((t) => t.parentId == null)];
+      const ctx = { today, tagsByTodo };
+      viewTodos = all.filter((t) => evalFilter(t, rules, ctx));
+    }
   } else {
     viewTodos = topActive.filter((t) => t.listId === target.listId);
   }
@@ -84,6 +101,7 @@ export async function GET(
     tags,
     tagsByTodo,
     sections,
+    filters,
     todos: viewTodos,
     subtasks,
     counts,

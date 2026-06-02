@@ -8,12 +8,14 @@ import {
   todoTagLinks,
   todoSections,
   todoCompletions,
+  todoFilters,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { isValidDateString, todayLocal } from "@/lib/dates";
 import { parseRule, advanceOrEnd } from "@/lib/todo/recurrence";
+import { parseFilterRules } from "@/lib/todo/filters";
 import { requireUser } from "@/lib/auth/context";
 import {
   MAX_TODO_TITLE_LEN,
@@ -25,6 +27,7 @@ import {
   nextListPosition,
   nextTagPosition,
   nextSectionPosition,
+  nextFilterPosition,
   findTodoById,
   resolveTagNames,
 } from "@/db/queries/todo";
@@ -614,5 +617,59 @@ export async function reorderSections(input: { orderedIds: string[] }): Promise<
         .where(and(eq(todoSections.id, input.orderedIds[i]), eq(todoSections.userId, user.id)));
     }
   });
+  revalidate();
+}
+
+// ---- Filters ----
+
+function sanitizeFilterRules(raw: unknown): string {
+  const rules = parseFilterRules(raw);
+  if (!rules) throw new Error("Invalid filter rules");
+  return JSON.stringify(rules);
+}
+
+export async function createFilter(input: {
+  id?: string;
+  name: string;
+  color?: string;
+  rules: unknown;
+}): Promise<{ id: string }> {
+  const { user } = await requireUser();
+  const name = (typeof input.name === "string" ? input.name.trim() : "") || "Filter";
+  const rulesJson = sanitizeFilterRules(input.rules);
+  const id = input.id ?? nanoid(12);
+  const position = await nextFilterPosition(user.id);
+  await db
+    .insert(todoFilters)
+    .values({ id, userId: user.id, name, color: input.color || "#8b5cf6", rulesJson, position })
+    .onConflictDoUpdate({ target: todoFilters.id, set: { name, color: input.color || "#8b5cf6", rulesJson } });
+  revalidate();
+  return { id };
+}
+
+export async function updateFilter(input: {
+  id: string;
+  name?: string;
+  color?: string;
+  rules?: unknown;
+}): Promise<void> {
+  if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
+  const set: Partial<typeof todoFilters.$inferInsert> = {};
+  if (input.name !== undefined) set.name = input.name.trim() || "Filter";
+  if (input.color !== undefined) set.color = input.color;
+  if (input.rules !== undefined) set.rulesJson = sanitizeFilterRules(input.rules);
+  if (Object.keys(set).length === 0) return;
+  await db
+    .update(todoFilters)
+    .set(set)
+    .where(and(eq(todoFilters.id, input.id), eq(todoFilters.userId, user.id)));
+  revalidate();
+}
+
+export async function deleteFilter(id: string): Promise<void> {
+  if (!id) throw new Error("id required");
+  const { user } = await requireUser();
+  await db.delete(todoFilters).where(and(eq(todoFilters.id, id), eq(todoFilters.userId, user.id)));
   revalidate();
 }

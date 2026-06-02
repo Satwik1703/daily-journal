@@ -21,12 +21,14 @@ import {
   Hash,
   Folder,
   ChevronRight,
+  Filter as FilterIcon,
 } from "lucide-react";
 import {
   SMART_VIEWS,
   type SmartView,
   type TodoList,
   type TodoTag,
+  type TodoFilter,
   type TodoViewCounts,
 } from "@/lib/todo/todo-meta";
 import { cn } from "@/lib/utils";
@@ -46,22 +48,28 @@ export function ViewSwitcher({
   currentView,
   lists,
   tags,
+  filters,
   counts,
   onCreateList,
   onEditList,
   onCreateTag,
   onEditTag,
+  onCreateFilter,
+  onEditFilter,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   currentView: string;
   lists: TodoList[];
   tags: TodoTag[];
+  filters: TodoFilter[];
   counts: TodoViewCounts;
   onCreateList: () => void;
   onEditList: (l: TodoList) => void;
   onCreateTag: () => void;
   onEditTag: (t: TodoTag) => void;
+  onCreateFilter: () => void;
+  onEditFilter: (f: TodoFilter) => void;
 }) {
   const router = useRouter();
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
@@ -205,6 +213,30 @@ export function ViewSwitcher({
                 icon={<Hash className="size-4" style={{ color: t.color }} />}
                 label={t.name}
                 onEdit={() => onEditTag(t)}
+              />
+            ))}
+          </div>
+
+          <div className="mt-4 mb-1 flex items-center justify-between px-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
+              Filters
+            </span>
+            <Button size="icon-xs" variant="ghost" aria-label="New filter" onClick={onCreateFilter}>
+              <Plus />
+            </Button>
+          </div>
+          <div className="space-y-0.5">
+            {filters.length === 0 ? (
+              <p className="px-2 py-1 text-xs text-muted-foreground">No filters yet.</p>
+            ) : null}
+            {filters.map((f) => (
+              <Row
+                key={f.id}
+                active={currentView === `filter-${f.id}`}
+                onClick={() => go(`filter-${f.id}`)}
+                icon={<FilterIcon className="size-4" style={{ color: f.color }} />}
+                label={f.name}
+                onEdit={() => onEditFilter(f)}
               />
             ))}
           </div>
