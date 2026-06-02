@@ -27,7 +27,17 @@ export async function POST(req: NextRequest) {
     const result = await (action as (input: unknown) => Promise<unknown>)(args);
     return NextResponse.json({ ok: true, result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // libSQL/Drizzle wraps the real reason ("foreign key mismatch",
+    // "no such column", a NOT NULL/UNIQUE violation, etc.) in `err.cause`.
+    // The top-level message is just "Failed query: <sql> params: ...", which
+    // is useless for diagnosis — surface the underlying cause too.
+    let message = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error ? (err.cause as unknown) : undefined;
+    const causeMsg =
+      cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
+    if (causeMsg && !message.includes(causeMsg)) {
+      message = `${message} — ${causeMsg}`;
+    }
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

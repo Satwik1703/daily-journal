@@ -1450,6 +1450,40 @@ Same-day follow-ups to Phase 12, all shipped to prod 2026-05-30.
 
 ---
 
+## ✅ Phase 12.G.2 — fix malformed `journal_tasks` FK (sync write failures)
+
+Shipped 2026-06-02. Bug fix follow-up to the Phase 12 data-wall migrations.
+
+### Symptom
+Adding any task in the journal failed with:
+> Sync failed: Failed query: insert into "journal_tasks" (...) values (...) — kFL6thbQz52W,u_satwik_seed_001,2026-06-02,secondary,Laundry,0,0
+
+The opaque "Failed query" hid the real SQLite reason: **`foreign key mismatch - "journal_tasks" referencing "journal_entries"`**.
+
+### Root cause
+`journal_tasks` was created in `0000` with a FK `date REFERENCES journal_entries(date)` — valid while `journal_entries` had a single-column `date` PK. Migration `0012` (Phase 12 user-scoping) rebuilt `journal_entries` to a composite PK `(user_id, date)`, so `date` alone is no longer unique. That orphaned the `journal_tasks.date` FK. libSQL enforces foreign keys by default, so **every write to `journal_tasks` threw `foreign key mismatch`** — and since journal-task mutations go through the offline sync queue, it surfaced as "Sync failed". schema.ts already declared no `date` FK; only the DB had drifted (0012 added `user_id` to `journal_tasks` via `ALTER TABLE`, carrying the stale `date` FK forward untouched).
+
+### Fix
+- **Migration `0015_fix_journal_tasks_fk.sql`** — SQLite can't drop a FK in place, so the standard rename-and-copy dance: build `journal_tasks_new` with only the valid `user_id → users(id)` cascade FK (no `date` FK), copy all rows, drop old, rename, recreate both indexes (`journal_tasks_date_kind`, `journal_tasks_user_date`). Wrapped in `PRAGMA foreign_keys = OFF/ON`. Registered as `idx 15` in `meta/_journal.json`.
+- **`src/app/api/sync/route.ts`** — catch block now appends `err.cause` to the returned message. libSQL/Drizzle bury the real reason ("foreign key mismatch", "no such column", NOT NULL/UNIQUE violations) in `err.cause`; the top-level message is just "Failed query: <sql>". Any future DB write error is now diagnosable from the UI instead of cryptic.
+
+### Audit ("don't get these errors anywhere")
+- Dumped all 38 FKs across 19 tables: `journal_tasks.date` was the **only** structural offender — every other FK targets a single-column PK (`*.id` / `users.id`).
+- Post-fix `pragma foreign_key_check` across the whole DB: **0 violations**.
+- Column parity DB-vs-`schema.ts` for all tables: no real drift.
+
+### Verification
+- `npx tsc --noEmit` clean · `npm run lint` → 0 errors, 44 warnings (pre-existing `set-state-in-effect` exemption) · `npm run build` clean (24 routes).
+- Local: backup `local.db.bak-before-0015`, migration applied, the exact failing insert now succeeds, 26 existing rows preserved.
+
+### Deploy
+1. `git push origin main`.
+2. `npm run db:migrate` against prod Turso (`.env.production.local` loaded). `0015` is a table-rebuild — additive/safe, copies existing rows.
+3. `vercel --prod --yes` from `Habit_Log/`.
+4. PWA shell stays `habit-log-v15` (no SHELL change — no version bump).
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
