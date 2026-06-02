@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db/client";
-import { todos, todoLists, todoTags, todoTagLinks } from "@/db/schema";
+import { todos, todoLists, todoTags, todoTagLinks, todoSections } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
@@ -16,6 +16,7 @@ import {
   nextTodoPosition,
   nextListPosition,
   nextTagPosition,
+  nextSectionPosition,
   findTodoById,
   resolveTagNames,
 } from "@/db/queries/todo";
@@ -89,6 +90,7 @@ export async function createTodo(input: {
   dueDate?: string | null;
   dueTime?: string | null;
   pinned?: boolean;
+  sectionId?: string | null;
   tagNames?: string[];
   tagIds?: string[];
 }): Promise<{ id: string }> {
@@ -100,6 +102,7 @@ export async function createTodo(input: {
   const dueTime = sanitizeDueTime(input.dueTime);
   const listId = input.listId ?? null;
   const parentId = input.parentId ?? null;
+  const sectionId = input.sectionId ?? null;
   const id = input.id ?? nanoid(12);
   const position = await nextTodoPosition(user.id, listId);
 
@@ -108,6 +111,7 @@ export async function createTodo(input: {
     userId: user.id,
     listId,
     parentId,
+    sectionId,
     title,
     note,
     priority,
@@ -233,9 +237,24 @@ export async function moveTodoToList(input: {
   const { user } = await requireUser();
   const listId = input.listId ?? null;
   const position = await nextTodoPosition(user.id, listId);
+  // Moving to a different list clears any section assignment (sections belong
+  // to a single list).
   await db
     .update(todos)
-    .set({ listId, position, updatedAt: new Date() })
+    .set({ listId, sectionId: null, position, updatedAt: new Date() })
+    .where(and(eq(todos.id, input.id), eq(todos.userId, user.id)));
+  revalidate();
+}
+
+export async function moveTodoToSection(input: {
+  id: string;
+  sectionId: string | null;
+}): Promise<void> {
+  if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
+  await db
+    .update(todos)
+    .set({ sectionId: input.sectionId ?? null, updatedAt: new Date() })
     .where(and(eq(todos.id, input.id), eq(todos.userId, user.id)));
   revalidate();
 }
@@ -314,6 +333,7 @@ export async function updateList(input: {
   emoji?: string | null;
   color?: string;
   viewMode?: string;
+  parentId?: string | null;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
   const { user } = await requireUser();
@@ -321,6 +341,7 @@ export async function updateList(input: {
   if (input.name !== undefined) set.name = sanitizeListName(input.name);
   if (input.emoji !== undefined) set.emoji = input.emoji?.trim() || null;
   if (input.color !== undefined) set.color = input.color;
+  if (input.parentId !== undefined) set.parentId = input.parentId;
   if (input.viewMode !== undefined) {
     set.viewMode = input.viewMode as typeof todoLists.$inferInsert.viewMode;
   }
@@ -444,5 +465,72 @@ export async function setTodoTags(input: {
     tagIds.push(...(await resolveTagNames(user.id, input.tagNames)));
   }
   await applyTodoTags(user.id, input.todoId, tagIds);
+  revalidate();
+}
+
+// ---- Sections ----
+
+function sanitizeSectionName(raw: unknown): string {
+  if (typeof raw !== "string") throw new Error("name must be a string");
+  const s = raw.trim();
+  if (!s) throw new Error("Section name required");
+  if (s.length > 80) throw new Error("Section name too long");
+  return s;
+}
+
+export async function createSection(input: {
+  id?: string;
+  listId: string;
+  name: string;
+}): Promise<{ id: string }> {
+  const { user } = await requireUser();
+  if (!input.listId) throw new Error("listId required");
+  const name = sanitizeSectionName(input.name);
+  const id = input.id ?? nanoid(12);
+  const position = await nextSectionPosition(user.id, input.listId);
+  await db
+    .insert(todoSections)
+    .values({ id, userId: user.id, listId: input.listId, name, position })
+    .onConflictDoUpdate({ target: todoSections.id, set: { name } });
+  revalidate();
+  return { id };
+}
+
+export async function updateSection(input: { id: string; name: string }): Promise<void> {
+  if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
+  const name = sanitizeSectionName(input.name);
+  await db
+    .update(todoSections)
+    .set({ name })
+    .where(and(eq(todoSections.id, input.id), eq(todoSections.userId, user.id)));
+  revalidate();
+}
+
+export async function deleteSection(id: string): Promise<void> {
+  if (!id) throw new Error("id required");
+  const { user } = await requireUser();
+  // Detach todos from the section (keep the tasks), then delete the section.
+  await db
+    .update(todos)
+    .set({ sectionId: null })
+    .where(and(eq(todos.sectionId, id), eq(todos.userId, user.id)));
+  await db
+    .delete(todoSections)
+    .where(and(eq(todoSections.id, id), eq(todoSections.userId, user.id)));
+  revalidate();
+}
+
+export async function reorderSections(input: { orderedIds: string[] }): Promise<void> {
+  const { user } = await requireUser();
+  if (!Array.isArray(input.orderedIds) || input.orderedIds.length === 0) return;
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < input.orderedIds.length; i++) {
+      await tx
+        .update(todoSections)
+        .set({ position: i })
+        .where(and(eq(todoSections.id, input.orderedIds[i]), eq(todoSections.userId, user.id)));
+    }
+  });
   revalidate();
 }

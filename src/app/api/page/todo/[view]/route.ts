@@ -8,6 +8,7 @@ import {
   getTags,
   getTagsByTodo,
   getTodoIdsForTag,
+  getSectionsForList,
 } from "@/db/queries/todo";
 import { addDays, todayLocal } from "@/lib/dates";
 import {
@@ -74,11 +75,15 @@ export async function GET(
     viewTodos = topActive.filter((t) => t.listId === target.listId);
   }
 
+  const sections =
+    target.kind === "list" ? await getSectionsForList(userId, target.listId) : [];
+
   const payload: TodoPageData = {
     view,
     lists,
     tags,
     tagsByTodo,
+    sections,
     todos: viewTodos,
     subtasks,
     counts,

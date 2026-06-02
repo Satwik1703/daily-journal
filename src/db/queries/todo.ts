@@ -1,5 +1,5 @@
 import { db } from "@/db/client";
-import { todos, todoLists, todoTags, todoTagLinks } from "@/db/schema";
+import { todos, todoLists, todoTags, todoTagLinks, todoSections } from "@/db/schema";
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import type {
   Todo,
@@ -7,6 +7,7 @@ import type {
   TodoViewMode,
   TodoListKind,
   TodoTag,
+  TodoSection,
 } from "@/lib/todo/todo-meta";
 
 function rowTodo(r: typeof todos.$inferSelect): Todo {
@@ -246,6 +247,27 @@ export async function nextListPosition(userId: string): Promise<number> {
     .from(todoLists)
     .where(eq(todoLists.userId, userId))
     .orderBy(desc(todoLists.position))
+    .limit(1);
+  return (rows[0]?.p ?? -1) + 1;
+}
+
+// ---- Sections ----
+
+export async function getSectionsForList(userId: string, listId: string): Promise<TodoSection[]> {
+  const rows = await db
+    .select()
+    .from(todoSections)
+    .where(and(eq(todoSections.userId, userId), eq(todoSections.listId, listId)))
+    .orderBy(asc(todoSections.position), asc(todoSections.id));
+  return rows.map((r) => ({ id: r.id, listId: r.listId, name: r.name, position: r.position }));
+}
+
+export async function nextSectionPosition(userId: string, listId: string): Promise<number> {
+  const rows = await db
+    .select({ p: todoSections.position })
+    .from(todoSections)
+    .where(and(eq(todoSections.userId, userId), eq(todoSections.listId, listId)))
+    .orderBy(desc(todoSections.position))
     .limit(1);
   return (rows[0]?.p ?? -1) + 1;
 }

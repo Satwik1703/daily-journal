@@ -116,7 +116,12 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     kind === "create_tag" ||
     kind === "update_tag" ||
     kind === "delete_tag" ||
-    kind === "set_todo_tags"
+    kind === "set_todo_tags" ||
+    kind === "move_todo_to_section" ||
+    kind === "create_section" ||
+    kind === "update_section" ||
+    kind === "delete_section" ||
+    kind === "reorder_sections"
   ) {
     // Any todo/list mutation can shift smart-list membership + counts across
     // every view, so invalidate the whole namespace.

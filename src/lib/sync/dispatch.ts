@@ -84,6 +84,11 @@ import {
   updateTag,
   deleteTag,
   setTodoTags,
+  moveTodoToSection,
+  createSection,
+  updateSection,
+  deleteSection,
+  reorderSections,
 } from "@/app/actions/todo";
 import {
   createSplit,
@@ -225,6 +230,11 @@ export const DISPATCH: Record<string, AnyAction> = {
   update_tag: updateTag,
   delete_tag: (args: { id: string }) => deleteTag(args.id),
   set_todo_tags: setTodoTags,
+  move_todo_to_section: moveTodoToSection,
+  create_section: createSection,
+  update_section: updateSection,
+  delete_section: (args: { id: string }) => deleteSection(args.id),
+  reorder_sections: reorderSections,
 };
 
 export type MutationKind = keyof typeof DISPATCH;

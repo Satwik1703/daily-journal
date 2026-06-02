@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Sheet,
@@ -18,6 +19,8 @@ import {
   Plus,
   Pencil,
   Hash,
+  Folder,
+  ChevronRight,
 } from "lucide-react";
 import {
   SMART_VIEWS,
@@ -61,6 +64,27 @@ export function ViewSwitcher({
   onEditTag: (t: TodoTag) => void;
 }) {
   const router = useRouter();
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("todo-collapsed-folders");
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleFolder = (id: string) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem("todo-collapsed-folders", JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
   const go = (view: string) => {
     router.push(`/todo/${view}`);
     onOpenChange(false);
@@ -106,27 +130,59 @@ export function ViewSwitcher({
             {lists.filter((l) => l.kind === "list").length === 0 ? (
               <p className="px-2 py-1 text-xs text-muted-foreground">No lists yet.</p>
             ) : null}
+            {/* Top-level lists: no folder, or a folder that no longer exists. */}
             {lists
-              .filter((l) => l.kind === "list")
+              .filter(
+                (l) =>
+                  l.kind === "list" &&
+                  (!l.parentId || !lists.some((f) => f.kind === "folder" && f.id === l.parentId)),
+              )
               .map((l) => (
-                <Row
-                  key={l.id}
-                  active={currentView === `list-${l.id}`}
-                  onClick={() => go(`list-${l.id}`)}
-                  icon={
-                    <span
-                      aria-hidden
-                      className="flex size-4 items-center justify-center text-[13px]"
-                      style={{ color: l.color }}
-                    >
-                      {l.emoji ?? "●"}
-                    </span>
-                  }
-                  label={l.name}
-                  count={counts.byList[l.id]}
-                  onEdit={() => onEditList(l)}
-                />
+                <ListRow key={l.id} l={l} currentView={currentView} counts={counts} go={go} onEditList={onEditList} />
               ))}
+            {/* Folders + their child lists. */}
+            {lists
+              .filter((l) => l.kind === "folder")
+              .map((f) => {
+                const children = lists.filter((l) => l.kind === "list" && l.parentId === f.id);
+                const collapsed = collapsedFolders.has(f.id);
+                return (
+                  <div key={f.id}>
+                    <div className="group flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm hover:bg-muted/50">
+                      <button
+                        type="button"
+                        onClick={() => toggleFolder(f.id)}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
+                      >
+                        <ChevronRight
+                          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !collapsed && "rotate-90")}
+                        />
+                        <Folder className="size-4 shrink-0" style={{ color: f.color }} />
+                        <span className="flex-1 truncate font-medium">{f.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onEditList(f)}
+                        aria-label={`Edit ${f.name}`}
+                        className="shrink-0 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                    </div>
+                    {!collapsed ? (
+                      <div className="ml-3 border-l border-border/60 pl-1.5">
+                        {children.length === 0 ? (
+                          <p className="px-2 py-1 text-xs text-muted-foreground/70">Empty folder</p>
+                        ) : (
+                          children.map((l) => (
+                            <ListRow key={l.id} l={l} currentView={currentView} counts={counts} go={go} onEditList={onEditList} />
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
           </div>
 
           <div className="mt-4 mb-1 flex items-center justify-between px-2">
@@ -155,6 +211,39 @@ export function ViewSwitcher({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function ListRow({
+  l,
+  currentView,
+  counts,
+  go,
+  onEditList,
+}: {
+  l: TodoList;
+  currentView: string;
+  counts: TodoViewCounts;
+  go: (view: string) => void;
+  onEditList: (l: TodoList) => void;
+}) {
+  return (
+    <Row
+      active={currentView === `list-${l.id}`}
+      onClick={() => go(`list-${l.id}`)}
+      icon={
+        <span
+          aria-hidden
+          className="flex size-4 items-center justify-center text-[13px]"
+          style={{ color: l.color }}
+        >
+          {l.emoji ?? "●"}
+        </span>
+      }
+      label={l.name}
+      count={counts.byList[l.id]}
+      onEdit={() => onEditList(l)}
+    />
   );
 }
 

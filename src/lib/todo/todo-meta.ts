@@ -47,6 +47,13 @@ export interface TodoTag {
   position: number;
 }
 
+export interface TodoSection {
+  id: string;
+  listId: string;
+  name: string;
+  position: number;
+}
+
 // ---- Priority ----
 
 export const PRIORITY_META: Record<
@@ -130,6 +137,7 @@ export interface TodoPageData {
   lists: TodoList[];
   tags: TodoTag[];
   tagsByTodo: Record<string, TodoTag[]>;
+  sections: TodoSection[]; // sections of the current list (empty for non-list views)
   todos: Todo[]; // top-level todos for the view
   subtasks: Record<string, { done: number; total: number }>;
   counts: TodoViewCounts;

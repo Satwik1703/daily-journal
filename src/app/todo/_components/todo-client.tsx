@@ -20,6 +20,7 @@ import {
 } from "@/lib/todo/todo-meta";
 import { QuickAdd } from "./quick-add";
 import { TodoListView } from "./todo-list";
+import { SectionList } from "./section-list";
 import { TaskDetailSheet } from "./task-detail-sheet";
 import { ViewSwitcher } from "./view-switcher";
 import { ListFormDialog } from "./list-form-dialog";
@@ -120,6 +121,8 @@ export function TodoClient({ view }: { view: string }) {
   }, [lists]);
 
   const isCompleted = target?.kind === "smart" && target.view === "completed";
+  const isList = target?.kind === "list";
+  const sections = data?.sections ?? [];
 
   // Compose the visible todo list from server data + overlays.
   const visible = useMemo(() => {
@@ -283,13 +286,45 @@ export function TodoClient({ view }: { view: string }) {
           <div className="h-14 animate-pulse rounded-lg bg-muted/40" />
           <div className="h-14 animate-pulse rounded-lg bg-muted/40" />
         </div>
+      ) : isList ? (
+        visible.length === 0 && sections.length === 0 ? (
+          <>
+            <EmptyState isCompleted={false} />
+            <SectionList
+              listId={(target as { listId: string }).listId}
+              sections={sections}
+              todos={visible}
+              listsById={listsById}
+              subtasks={data.subtasks}
+              tagsByTodo={data.tagsByTodo}
+              today={today}
+              reorderable={sort === "manual"}
+              onToggle={handleToggle}
+              onOpen={openDetail}
+              onPriority={handlePriority}
+              onPin={handlePin}
+              onReorder={handleReorder}
+            />
+          </>
+        ) : (
+          <SectionList
+            listId={(target as { listId: string }).listId}
+            sections={sections}
+            todos={visible}
+            listsById={listsById}
+            subtasks={data.subtasks}
+            tagsByTodo={data.tagsByTodo}
+            today={today}
+            reorderable={sort === "manual"}
+            onToggle={handleToggle}
+            onOpen={openDetail}
+            onPriority={handlePriority}
+            onPin={handlePin}
+            onReorder={handleReorder}
+          />
+        )
       ) : visible.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-12 text-center">
-          <ClipboardList className="size-7 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">
-            {isCompleted ? "Nothing completed yet." : "All clear here."}
-          </p>
-        </div>
+        <EmptyState isCompleted={isCompleted} />
       ) : (
         <TodoListView
           todos={visible}
@@ -297,7 +332,7 @@ export function TodoClient({ view }: { view: string }) {
           subtasks={data.subtasks}
           tagsByTodo={data.tagsByTodo}
           today={today}
-          showList={target?.kind !== "list"}
+          showList
           reorderable={!isCompleted && sort === "manual"}
           onToggle={handleToggle}
           onOpen={openDetail}
@@ -336,7 +371,12 @@ export function TodoClient({ view }: { view: string }) {
         }}
       />
 
-      <ListFormDialog open={listDialogOpen} onOpenChange={setListDialogOpen} editing={editingList} />
+      <ListFormDialog
+        open={listDialogOpen}
+        onOpenChange={setListDialogOpen}
+        editing={editingList}
+        folders={lists.filter((l) => l.kind === "folder")}
+      />
       <TagFormDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} editing={editingTag} />
       <SearchSheet open={searchOpen} onOpenChange={setSearchOpen} onPick={openDetail} />
 
@@ -345,6 +385,7 @@ export function TodoClient({ view }: { view: string }) {
         lists={lists}
         allTags={data?.tags ?? []}
         initialTags={detail ? (data?.tagsByTodo[detail.id] ?? []) : []}
+        sections={sections}
         today={today}
         open={detailOpen}
         onOpenChange={(o) => {
@@ -352,6 +393,17 @@ export function TodoClient({ view }: { view: string }) {
           if (!o) setDetail(null);
         }}
       />
+    </div>
+  );
+}
+
+function EmptyState({ isCompleted }: { isCompleted: boolean }) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-12 text-center">
+      <ClipboardList className="size-7 text-muted-foreground/60" />
+      <p className="text-sm text-muted-foreground">
+        {isCompleted ? "Nothing completed yet." : "All clear here."}
+      </p>
     </div>
   );
 }

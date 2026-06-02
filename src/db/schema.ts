@@ -685,3 +685,22 @@ export const todoTagLinks = sqliteTable(
     index("todo_tag_links_user").on(t.userId),
   ],
 );
+
+// Sections within a list (Phase 14 Part 3). todos.sectionId points here;
+// deleting a section nulls out its todos' sectionId (handled in the action).
+export const todoSections = sqliteTable(
+  "todo_sections",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    listId: text("list_id")
+      .notNull()
+      .references((): AnySQLiteColumn => todoLists.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("todo_sections_list").on(t.listId)],
+);

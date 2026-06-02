@@ -28,11 +28,17 @@ import {
 import { mutate } from "@/lib/sync/mutate";
 import { nanoid } from "nanoid";
 import { formatShortDate, type DateString } from "@/lib/dates";
-import { priorityMeta, type Todo, type TodoList, type TodoTag } from "@/lib/todo/todo-meta";
+import {
+  priorityMeta,
+  type Todo,
+  type TodoList,
+  type TodoTag,
+  type TodoSection,
+} from "@/lib/todo/todo-meta";
 import { DueDatePopover } from "./due-date-popover";
 import { PriorityMenu } from "./priority-menu";
 import { TagPicker } from "./tag-picker";
-import { Hash } from "lucide-react";
+import { Hash, Rows3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function TaskDetailSheet({
@@ -40,6 +46,7 @@ export function TaskDetailSheet({
   lists,
   allTags,
   initialTags,
+  sections,
   today,
   open,
   onOpenChange,
@@ -48,6 +55,7 @@ export function TaskDetailSheet({
   lists: TodoList[];
   allTags: TodoTag[];
   initialTags: TodoTag[];
+  sections: TodoSection[];
   today: DateString;
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -58,6 +66,7 @@ export function TaskDetailSheet({
   const [dueDate, setDueDate] = useState<DateString | null>(null);
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [listId, setListId] = useState<string | null>(null);
+  const [sectionId, setSectionId] = useState<string | null>(null);
   const [status, setStatus] = useState<Todo["status"]>("active");
   const [tags, setTags] = useState<TodoTag[]>([]);
   const [subtasks, setSubtasks] = useState<Todo[]>([]);
@@ -72,6 +81,7 @@ export function TaskDetailSheet({
     setDueDate(todo.dueDate);
     setDueTime(todo.dueTime);
     setListId(todo.listId);
+    setSectionId(todo.sectionId);
     setStatus(todo.status);
     setTags(initialTags);
     setSubtasks([]);
@@ -113,7 +123,12 @@ export function TaskDetailSheet({
   };
   const setListNow = (lid: string | null) => {
     setListId(lid);
+    setSectionId(null);
     void mutate("move_todo_to_list", { id, listId: lid });
+  };
+  const setSectionNow = (sid: string | null) => {
+    setSectionId(sid);
+    void mutate("move_todo_to_section", { id, sectionId: sid });
   };
   const setTagsNow = (next: TodoTag[]) => {
     setTags(next);
@@ -260,6 +275,27 @@ export function TaskDetailSheet({
                 {tags.length ? tags.map((t) => t.name).join(", ") : "Tags"}
               </AttrChip>
             </TagPicker>
+
+            {sections.length > 0 && sections[0].listId === listId ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<span className="inline-flex outline-none" />}>
+                  <AttrChip active={!!sectionId}>
+                    <Rows3 className="size-3.5" />
+                    {sectionId
+                      ? (sections.find((s) => s.id === sectionId)?.name ?? "Section")
+                      : "Section"}
+                  </AttrChip>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                  <DropdownMenuItem onClick={() => setSectionNow(null)}>No section</DropdownMenuItem>
+                  {sections.map((s) => (
+                    <DropdownMenuItem key={s.id} onClick={() => setSectionNow(s.id)}>
+                      {s.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
 
           {/* note */}

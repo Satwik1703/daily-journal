@@ -1545,7 +1545,16 @@ Offline-first todo manager: lists + Inbox, smart lists, quick-add NLP, prioritie
 
 **Verified local:** tsc clean · lint 0 errors · build clean · DB smoke (tag links, both-direction cascade, 0 FK violations).
 
-**Parts remaining (planned):** 3 folders + sections · 4 recurrence engine · 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
+### ✅ Part 3 — Folders + Sections (committed, local only)
+
+**Schema** (`0018_todo_sections.sql`, applied local — additive, 0 FK violations): `todo_sections` (id/userId/listId FK cascade/name/position). Folders reuse the existing `todo_lists.kind`/`parent_id` — no new table.
+
+- **Folders:** a list with `kind='folder'`; lists nest via `parentId`. Switcher groups lists under collapsible folders (collapse state in localStorage; orphaned-parent lists fall back to top-level). `ListFormDialog` gains a List/Folder toggle (create) + a folder picker (assign list to folder). `updateList` accepts `parentId`.
+- **Sections:** headers within a list. `SectionList` groups a list's todos by section (No-section group first, then each section with count + rename/delete menu, inline "Add section"); each group is its own dnd `TodoListView`. Detail sheet gets a Section picker (shown when the todo's list has sections). Backend: `createSection/updateSection/deleteSection/reorderSections` (+ `moveTodoToSection`; `moveTodoToList` clears `sectionId`; deleting a section detaches its todos). `createTodo` accepts `sectionId`. Payload gains `sections` (current list only). Dispatch + cacheKeys extended.
+
+**Verified local:** tsc clean · lint 0 errors · build clean · DB smoke (folder nesting, section assign, section-delete→detach, list-delete→sections cascade + todos.list_id null, 0 FK violations).
+
+**Parts remaining (planned):** 4 recurrence engine · 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
 
 ---
 
