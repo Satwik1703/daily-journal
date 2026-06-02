@@ -704,3 +704,21 @@ export const todoSections = sqliteTable(
   },
   (t) => [index("todo_sections_list").on(t.listId)],
 );
+
+// Completion log for recurring todos (Phase 14 Part 4) — one row per completed
+// occurrence. Powers "after N" recurrence limits + future streaks/history.
+export const todoCompletions = sqliteTable(
+  "todo_completions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    todoId: text("todo_id")
+      .notNull()
+      .references((): AnySQLiteColumn => todos.id, { onDelete: "cascade" }),
+    completedDate: text("completed_date").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("todo_completions_todo").on(t.todoId)],
+);

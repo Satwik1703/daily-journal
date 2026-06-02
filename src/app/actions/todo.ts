@@ -1,11 +1,19 @@
 "use server";
 
 import { db } from "@/db/client";
-import { todos, todoLists, todoTags, todoTagLinks, todoSections } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import {
+  todos,
+  todoLists,
+  todoTags,
+  todoTagLinks,
+  todoSections,
+  todoCompletions,
+} from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
-import { isValidDateString } from "@/lib/dates";
+import { isValidDateString, todayLocal } from "@/lib/dates";
+import { parseRule, advanceOrEnd } from "@/lib/todo/recurrence";
 import { requireUser } from "@/lib/auth/context";
 import {
   MAX_TODO_TITLE_LEN,
@@ -91,6 +99,7 @@ export async function createTodo(input: {
   dueTime?: string | null;
   pinned?: boolean;
   sectionId?: string | null;
+  repeatJson?: string | null;
   tagNames?: string[];
   tagIds?: string[];
 }): Promise<{ id: string }> {
@@ -103,6 +112,8 @@ export async function createTodo(input: {
   const listId = input.listId ?? null;
   const parentId = input.parentId ?? null;
   const sectionId = input.sectionId ?? null;
+  const repeatRule = input.repeatJson ? parseRule(input.repeatJson) : null;
+  const repeatJson = repeatRule ? JSON.stringify(repeatRule) : null;
   const id = input.id ?? nanoid(12);
   const position = await nextTodoPosition(user.id, listId);
 
@@ -118,6 +129,7 @@ export async function createTodo(input: {
     dueDate,
     dueTime,
     isAllDay: !dueTime,
+    repeatJson,
     pinned: input.pinned ?? false,
     position,
   };
@@ -136,6 +148,7 @@ export async function createTodo(input: {
         dueDate,
         dueTime,
         isAllDay: !dueTime,
+        repeatJson,
         pinned: input.pinned ?? false,
         updatedAt: new Date(),
       },
@@ -161,6 +174,7 @@ export async function updateTodo(input: {
   dueDate?: string | null;
   dueTime?: string | null;
   pinned?: boolean;
+  repeatJson?: string | null;
 }): Promise<void> {
   if (!input.id) throw new Error("id required");
   const { user } = await requireUser();
@@ -178,6 +192,15 @@ export async function updateTodo(input: {
     set.isAllDay = !set.dueTime;
   }
   if (input.pinned !== undefined) set.pinned = input.pinned;
+  if (input.repeatJson !== undefined) {
+    if (input.repeatJson === null || input.repeatJson === "") {
+      set.repeatJson = null;
+    } else {
+      const rule = parseRule(input.repeatJson);
+      if (!rule) throw new Error("Invalid repeat rule");
+      set.repeatJson = JSON.stringify(rule);
+    }
+  }
 
   await db
     .update(todos)
@@ -192,6 +215,36 @@ export async function toggleTodo(input: { id: string }): Promise<{ status: TodoS
   const existing = await findTodoById(user.id, input.id);
   if (!existing) throw new Error("todo not found");
   const nowDone = existing.status !== "done";
+
+  // Recurring task being completed → roll forward to the next occurrence
+  // instead of marking done (unless the series has ended).
+  const rule = nowDone && existing.repeatJson ? parseRule(existing.repeatJson) : null;
+  if (rule) {
+    const today = todayLocal();
+    const priorRow = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(todoCompletions)
+      .where(and(eq(todoCompletions.userId, user.id), eq(todoCompletions.todoId, existing.id)));
+    const completedCount = (Number(priorRow[0]?.n) || 0) + 1;
+    await db.insert(todoCompletions).values({
+      id: nanoid(12),
+      userId: user.id,
+      todoId: existing.id,
+      completedDate: today,
+    });
+    const base = rule.mode === "completion" ? today : (existing.dueDate ?? today);
+    const next = advanceOrEnd(rule, base, completedCount);
+    if (next) {
+      await db
+        .update(todos)
+        .set({ dueDate: next, status: "active", completedAt: null, updatedAt: new Date() })
+        .where(and(eq(todos.id, existing.id), eq(todos.userId, user.id)));
+      revalidate();
+      return { status: "active" };
+    }
+    // Series ended — fall through to a normal completion.
+  }
+
   const status: TodoStatus = nowDone ? "done" : "active";
   await db
     .update(todos)
@@ -199,6 +252,35 @@ export async function toggleTodo(input: { id: string }): Promise<{ status: TodoS
     .where(and(eq(todos.id, input.id), eq(todos.userId, user.id)));
   revalidate();
   return { status };
+}
+
+export async function skipRecurrence(input: { id: string }): Promise<void> {
+  if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
+  const existing = await findTodoById(user.id, input.id);
+  if (!existing || !existing.repeatJson) throw new Error("not a recurring todo");
+  const rule = parseRule(existing.repeatJson);
+  if (!rule) return;
+  const today = todayLocal();
+  const base = rule.mode === "completion" ? today : (existing.dueDate ?? today);
+  // Skip = advance without logging a completion (count unchanged).
+  const priorRow = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(todoCompletions)
+    .where(and(eq(todoCompletions.userId, user.id), eq(todoCompletions.todoId, existing.id)));
+  const next = advanceOrEnd(rule, base, Number(priorRow[0]?.n) || 0);
+  if (next) {
+    await db
+      .update(todos)
+      .set({ dueDate: next, updatedAt: new Date() })
+      .where(and(eq(todos.id, existing.id), eq(todos.userId, user.id)));
+  } else {
+    await db
+      .update(todos)
+      .set({ status: "done", completedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(todos.id, existing.id), eq(todos.userId, user.id)));
+  }
+  revalidate();
 }
 
 export async function setTodoStatus(input: {

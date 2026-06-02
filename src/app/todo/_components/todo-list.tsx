@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks } from "lucide-react";
+import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks, Repeat } from "lucide-react";
 import { PriorityMenu, PriorityFlag } from "./priority-menu";
 import { TagChips } from "./tag-picker";
 import { formatShortDate, type DateString } from "@/lib/dates";
@@ -201,7 +201,7 @@ function Row({
         >
           {todo.title}
         </div>
-        {(todo.dueDate || (progress && progress.total > 0) || (showList && list) || (tags && tags.length > 0)) && (
+        {(todo.dueDate || todo.repeatJson || (progress && progress.total > 0) || (showList && list) || (tags && tags.length > 0)) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
             {todo.dueDate ? (
               <span className={cn("inline-flex items-center gap-1", dueTone)}>
@@ -215,6 +215,7 @@ function Row({
                 ) : null}
               </span>
             ) : null}
+            {todo.repeatJson ? <Repeat className="size-3 text-muted-foreground" /> : null}
             {progress && progress.total > 0 ? (
               <span className="inline-flex items-center gap-1 text-muted-foreground">
                 <ListChecks className="size-3" />

@@ -38,7 +38,9 @@ import {
 import { DueDatePopover } from "./due-date-popover";
 import { PriorityMenu } from "./priority-menu";
 import { TagPicker } from "./tag-picker";
-import { Hash, Rows3 } from "lucide-react";
+import { RepeatEditor } from "./repeat-editor";
+import { describeRule, parseRule } from "@/lib/todo/recurrence";
+import { Hash, Rows3, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function TaskDetailSheet({
@@ -69,6 +71,7 @@ export function TaskDetailSheet({
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [status, setStatus] = useState<Todo["status"]>("active");
   const [tags, setTags] = useState<TodoTag[]>([]);
+  const [repeatJson, setRepeatJson] = useState<string | null>(null);
   const [subtasks, setSubtasks] = useState<Todo[]>([]);
   const [newSub, setNewSub] = useState("");
 
@@ -84,6 +87,7 @@ export function TaskDetailSheet({
     setSectionId(todo.sectionId);
     setStatus(todo.status);
     setTags(initialTags);
+    setRepeatJson(todo.repeatJson);
     setSubtasks([]);
     // Fetch subtasks lazily.
     let cancelled = false;
@@ -133,6 +137,10 @@ export function TaskDetailSheet({
   const setTagsNow = (next: TodoTag[]) => {
     setTags(next);
     void mutate("set_todo_tags", { todoId: id, tagIds: next.map((t) => t.id) });
+  };
+  const setRepeatNow = (json: string | null) => {
+    setRepeatJson(json);
+    void mutate("update_todo", { id, repeatJson: json });
   };
   const toggleDone = () => {
     const next = status === "active" ? "done" : "active";
@@ -276,6 +284,13 @@ export function TaskDetailSheet({
               </AttrChip>
             </TagPicker>
 
+            <RepeatEditor value={repeatJson} onChange={setRepeatNow}>
+              <AttrChip active={!!repeatJson}>
+                <Repeat className="size-3.5" />
+                {repeatJson ? (parseRule(repeatJson) ? describeRule(parseRule(repeatJson)!) : "Repeat") : "Repeat"}
+              </AttrChip>
+            </RepeatEditor>
+
             {sections.length > 0 && sections[0].listId === listId ? (
               <DropdownMenu>
                 <DropdownMenuTrigger render={<span className="inline-flex outline-none" />}>
@@ -361,6 +376,19 @@ export function TaskDetailSheet({
 
           {/* footer actions */}
           <div className="flex items-center gap-2 border-t border-border/60 pt-3">
+            {repeatJson ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void mutate("skip_recurrence", { id });
+                  onOpenChange(false);
+                }}
+                className="gap-1.5"
+              >
+                <Repeat className="size-3.5" /> Skip
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" onClick={markWontDo} className="gap-1.5">
               <Ban className="size-3.5" /> Won&apos;t do
             </Button>

@@ -105,6 +105,7 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     kind === "create_todo" ||
     kind === "update_todo" ||
     kind === "toggle_todo" ||
+    kind === "skip_recurrence" ||
     kind === "set_todo_status" ||
     kind === "delete_todo" ||
     kind === "move_todo_to_list" ||

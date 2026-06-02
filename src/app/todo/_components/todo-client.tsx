@@ -214,10 +214,18 @@ export function TodoClient({ view }: { view: string }) {
       dueDate,
       dueTime: parsed.dueTime,
       tagNames: parsed.tags.length ? parsed.tags : undefined,
+      repeatJson: parsed.repeat ?? undefined,
     });
   };
 
   const handleToggle = (t: Todo) => {
+    // Recurring tasks roll forward server-side instead of disappearing, so we
+    // don't optimistically hide them — let the refetch re-render the next
+    // occurrence (with its new due date).
+    if (t.repeatJson && t.status === "active") {
+      void mutate("toggle_todo", { id: t.id });
+      return;
+    }
     setStatusOverride((m) => {
       const next = new Map(m);
       next.set(t.id, t.status === "active" ? "done" : "active");

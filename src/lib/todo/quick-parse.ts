@@ -20,6 +20,7 @@ export interface ParsedQuickAdd {
   dueTime: string | null; // "HH:MM"
   listName: string | null;
   tags: string[];
+  repeat: string | null; // JSON.stringify(RepeatRule) or null
 }
 
 const WEEKDAYS: Record<string, number> = {
@@ -73,6 +74,7 @@ export function parseQuickAdd(input: string, today: DateString): ParsedQuickAdd 
   let listName: string | null = null;
   let dueDate: DateString | null = null;
   let dueTime: string | null = null;
+  let repeat: string | null = null;
 
   // Helper: replace a matched slice with a single space.
   const strip = (re: RegExp, onMatch: (m: RegExpExecArray) => boolean) => {
@@ -135,6 +137,31 @@ export function parseQuickAdd(input: string, today: DateString): ParsedQuickAdd 
     return (dueDate = monthDay(today, MONTHS[m[2].toLowerCase()], parseInt(m[1], 10))) != null;
   });
 
+  // --- recurrence: "every N units", "every <weekday>", "daily/weekly/…" ---
+  const wdForRepeat = Object.keys(WEEKDAYS).join("|");
+  strip(/(?:^|\s)every\s+(\d{1,2})\s+(day|days|week|weeks|month|months|year|years)(?=\s)/gi, (m) => {
+    if (repeat) return false;
+    const n = Math.max(1, parseInt(m[1], 10));
+    const u = m[2].toLowerCase();
+    const freq = u.startsWith("day") ? "daily" : u.startsWith("week") ? "weekly" : u.startsWith("month") ? "monthly" : "yearly";
+    repeat = JSON.stringify({ freq, interval: n, mode: "dueDate", ends: { type: "never" } });
+    return true;
+  });
+  strip(new RegExp(`(?:^|\\s)every\\s+(${wdForRepeat})(?=\\s)`, "gi"), (m) => {
+    if (repeat) return false;
+    const wd = WEEKDAYS[m[1].toLowerCase()];
+    repeat = JSON.stringify({ freq: "weekly", interval: 1, byDay: [wd], mode: "dueDate", ends: { type: "never" } });
+    if (!dueDate) dueDate = addDays(today, daysUntilWeekday(today, wd));
+    return true;
+  });
+  strip(/(?:^|\s)(every\s+day|daily|every\s+week|weekly|every\s+month|monthly|every\s+year|yearly)(?=\s)/gi, (m) => {
+    if (repeat) return false;
+    const t = m[1].toLowerCase();
+    const freq = t.includes("day") || t === "daily" ? "daily" : t.includes("week") || t === "weekly" ? "weekly" : t.includes("month") || t === "monthly" ? "monthly" : "yearly";
+    repeat = JSON.stringify({ freq, interval: 1, mode: "dueDate", ends: { type: "never" } });
+    return true;
+  });
+
   // --- relative words ---
   let tonight = false;
   strip(/(?:^|\s)(today|tonight|tomorrow|tmr|tom|yesterday)(?=\s)/gi, (m) => {
@@ -191,7 +218,7 @@ export function parseQuickAdd(input: string, today: DateString): ParsedQuickAdd 
   if (dueTime && !dueDate) dueDate = today;
 
   const title = rest.replace(/\s+/g, " ").trim();
-  return { title, priority, dueDate, dueTime, listName, tags };
+  return { title, priority, dueDate, dueTime, listName, tags, repeat };
 }
 
 /** Resolve a month/day to a DateString, rolling to next year if already past. */

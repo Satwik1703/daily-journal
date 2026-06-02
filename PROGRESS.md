@@ -1554,7 +1554,17 @@ Offline-first todo manager: lists + Inbox, smart lists, quick-add NLP, prioritie
 
 **Verified local:** tsc clean · lint 0 errors · build clean · DB smoke (folder nesting, section assign, section-delete→detach, list-delete→sections cascade + todos.list_id null, 0 FK violations).
 
-**Parts remaining (planned):** 4 recurrence engine · 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
+### ✅ Part 4 — Recurrence engine (committed, local only)
+
+**Schema** (`0019_todo_completions.sql`, applied local — additive, 0 FK violations): `todo_completions` (id/userId/todoId FK cascade/completedDate) — one row per completed occurrence (powers "after N" + future streaks). Recurrence rule itself lives in the existing `todos.repeat_json`.
+
+- **Rule lib** `src/lib/todo/recurrence.ts` (pure, unit-tested 12/12 via `scripts/test-recurrence.ts`): `RepeatRule {freq daily|weekly|monthly|yearly, interval, byDay?, mode dueDate|completion, ends never|on|after}`; `parseRule` (validate untrusted), `nextOccurrence` (daily/weekly±byDay/monthly w/ clamp/yearly), `advanceOrEnd` (respects ends), `describeRule`.
+- **Roll-forward:** completing a recurring active todo logs a `todo_completions` row and advances `dueDate` to the next occurrence (stays active) instead of marking done; series end (ends-on past / ends-after count) falls through to a normal completion. `skipRecurrence` advances without logging. Client doesn't optimistically hide recurring toggles (lets the refetch render the next occurrence).
+- **UI:** `RepeatEditor` popover in the detail (freq grid + interval + weekly day toggles + mode) → `update_todo {repeatJson}`; row shows a Repeat badge; detail footer gets a **Skip** button for recurring tasks. Quick-add parses `daily`, `weekly`, `monthly`, `yearly`, `every N days/weeks/months/years`, `every <weekday>` (→ weekly byDay + first due date). `createTodo`/`updateTodo` accept + validate `repeatJson`; dispatch + cacheKeys extended (`skip_recurrence`).
+
+**Verified local:** tsc clean · lint 0 errors · build clean · parser 15/15 · recurrence 12/12 · DB smoke (completion log + cascade on todo delete, 0 FK violations).
+
+**Parts remaining (planned):** 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
 
 ---
 
