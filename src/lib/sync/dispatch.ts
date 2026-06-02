@@ -69,6 +69,19 @@ import {
   deleteBodyWeight,
 } from "@/app/actions/body-weight";
 import {
+  createTodo,
+  updateTodo,
+  toggleTodo,
+  setTodoStatus,
+  deleteTodo,
+  moveTodoToList,
+  reorderTodos,
+  createList,
+  updateList,
+  deleteList,
+  reorderLists,
+} from "@/app/actions/todo";
+import {
   createSplit,
   updateSplit,
   archiveSplit,
@@ -191,6 +204,19 @@ export const DISPATCH: Record<string, AnyAction> = {
   log_body_weight: logBodyWeight,
   update_body_weight: updateBodyWeight,
   delete_body_weight: (args: { id: string }) => deleteBodyWeight(args.id),
+
+  // todo (Phase 13)
+  create_todo: createTodo,
+  update_todo: updateTodo,
+  toggle_todo: toggleTodo,
+  set_todo_status: setTodoStatus,
+  delete_todo: (args: { id: string }) => deleteTodo(args.id),
+  move_todo_to_list: moveTodoToList,
+  reorder_todos: reorderTodos,
+  create_list: createList,
+  update_list: updateList,
+  delete_list: (args: { id: string }) => deleteList(args.id),
+  reorder_lists: reorderLists,
 };
 
 export type MutationKind = keyof typeof DISPATCH;

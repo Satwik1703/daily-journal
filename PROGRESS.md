@@ -1513,6 +1513,32 @@ New users (friends who sign up) landed on an **empty Gym tab** — gym entities 
 
 ---
 
+## 🚧 Phase 14 — Todo tab (TickTick-style task manager) — IN PROGRESS
+
+Plan: `C:\Users\Admin\.claude\plans\okay-now-as-part-cozy-kettle.md`. Multi-phase roadmap, built locally **commit-by-commit with NO push/deploy until all parts are done** (user tests the whole bundle, then we ship at once). Lives under the More hub at `/todo` (no bottom-nav change). Decisions: in-app reminders first (web push deferred to a later part); all four advanced views (Calendar → Kanban → Eisenhower → Timeline) planned.
+
+### ✅ Part 1 — Core spine (committed, local only)
+
+Offline-first todo manager: lists + Inbox, smart lists, quick-add NLP, priorities, due dates, subtasks, completion.
+
+**Schema** (`0016_todo_core.sql`, applied local — additive, 0 FK violations):
+- `todo_lists` — id/userId/name/emoji/color/kind(list|folder)/parentId/viewMode/position/archivedAt. FK userId→users cascade.
+- `todos` — id/userId/listId(null=Inbox, FK set null)/parentId(self, subtask)/sectionId/title/note/priority(0–3)/status(active|done|wontDo)/completedAt/dueDate/dueTime/isAllDay/repeatJson/pinned/position(real)/created/updated. `repeat_json`+`section_id` reserved for later parts.
+
+**Backend:** `src/db/queries/todo.ts` (active/completed/subtask-count/list reads), `src/app/actions/todo.ts` (createTodo/updateTodo/toggleTodo/setTodoStatus/deleteTodo/moveTodoToList/reorderTodos + createList/updateList/deleteList/reorderLists, idempotent upserts, requireUser-scoped). Wired into `dispatch.ts` (11 kinds) + `mutate.ts` cacheKeysFor (`todo:*`). SWR readers `/api/page/todo/[view]` + `/api/page/todo-detail/[id]`.
+
+**Parser:** `src/lib/todo/quick-parse.ts` — pure, unit-tested (`scripts/test-quick-parse.ts`, 15/15). Tokens: `!`/`!!`/`!!!` (or `!high|!med|!low`) priority, `~list`, `#tag`, natural dates (`today`, `tomorrow`, `next monday`, `jun 19`, `19 jun`, `in 3 days`, `next week`), times (`3pm`, `9 am`, `15:00`, `tonight`→21:00). Recognized tokens stripped from the title.
+
+**UI** (`src/app/todo/**`, all `@base-ui/react`): `/todo`→`/todo/today` redirect; `[view]` route (smart views + `list-<id>`); `todo-client` orchestrator with optimistic overlays (add/hide/status/reorder + reconcile on refetch); `quick-add` with live chip preview; `todo-list` dnd-kit reorder + priority-colored round checkboxes, due chips (overdue red/today amber), subtask progress, pin-to-top; `task-detail-sheet` (bottom sheet: notes, subtasks add/toggle/delete, priority, due+time, list reassign, Won't-do, delete); `view-switcher` left drawer (smart lists + lists w/ live counts); `list-form-dialog` (emoji+color presets, create/edit/delete). `todo-meta.ts` = client-safe types/constants/`parseViewParam`/`todoMatchesSmartView`. More hub gets a Todo card. PWA `sw.js` → `habit-log-v16` + `/todo` shell entries.
+
+**Smart views:** Today (due ≤ today incl. overdue), Tomorrow, Next 7 Days, Inbox (no list), All, Completed.
+
+**Verified local:** tsc clean · lint 0 errors (warnings only, existing set-state-in-effect pattern) · build clean (26 routes) · parser 15/15 · DB smoke (subtask group-by, list-delete→Inbox fallback, 0 FK violations).
+
+**Parts remaining (planned):** 2 organize & power (tags, folders, sections, sort, search, filters, swipe, bulk) · 3 recurrence engine · 4 views (calendar/kanban/eisenhower) · 5 timeline + pomodoro integration + shortcuts · 6 web push reminders (optional).
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.

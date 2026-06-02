@@ -101,6 +101,23 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("gym-library");
     keys.push("settings");
   }
+  if (
+    kind === "create_todo" ||
+    kind === "update_todo" ||
+    kind === "toggle_todo" ||
+    kind === "set_todo_status" ||
+    kind === "delete_todo" ||
+    kind === "move_todo_to_list" ||
+    kind === "reorder_todos" ||
+    kind === "create_list" ||
+    kind === "update_list" ||
+    kind === "delete_list" ||
+    kind === "reorder_lists"
+  ) {
+    // Any todo/list mutation can shift smart-list membership + counts across
+    // every view, so invalidate the whole namespace.
+    keys.push("todo:*");
+  }
   return keys;
 }
 

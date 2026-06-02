@@ -566,3 +566,86 @@ export const books = sqliteTable(
   },
   (t) => [index("books_status").on(t.status)],
 );
+
+// ---------- Todo (Phase 13: TickTick-style task manager) ----------
+
+// A todo list (or a folder grouping lists). `kind = 'folder'` rows are
+// containers; `kind = 'list'` rows can sit inside a folder via `parentId`.
+// Todos with `listId = null` live in the implicit Inbox.
+export const todoLists = sqliteTable(
+  "todo_lists",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    emoji: text("emoji"),
+    color: text("color").notNull().default("#3b82f6"),
+    kind: text("kind", { enum: ["list", "folder"] })
+      .notNull()
+      .default("list"),
+    // Folder this list belongs to (folder rows have parentId = null).
+    parentId: text("parent_id"),
+    // Saved view mode for this list (Phase 4 adds non-list modes).
+    viewMode: text("view_mode", {
+      enum: ["list", "kanban", "calendar", "eisenhower", "timeline"],
+    })
+      .notNull()
+      .default("list"),
+    position: integer("position").notNull().default(0),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("todo_lists_user").on(t.userId)],
+);
+
+// A todo. `parentId` (self-FK) makes it a subtask of another todo. `listId`
+// null = Inbox. `repeatJson` + `sectionId` are reserved for later phases
+// (added now as nullable to avoid a future table rebuild).
+export const todos = sqliteTable(
+  "todos",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    // List bucket (null = Inbox). FK set null so deleting a list orphans its
+    // todos back to the Inbox rather than destroying them.
+    listId: text("list_id").references((): AnySQLiteColumn => todoLists.id, {
+      onDelete: "set null",
+    }),
+    // Parent todo for subtasks (null = top-level).
+    parentId: text("parent_id"),
+    // Section within a list (Phase 2).
+    sectionId: text("section_id"),
+    title: text("title").notNull(),
+    note: text("note"),
+    // 0 = none, 1 = low, 2 = medium, 3 = high.
+    priority: integer("priority").notNull().default(0),
+    status: text("status", { enum: ["active", "done", "wontDo"] })
+      .notNull()
+      .default("active"),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+    dueDate: text("due_date"),
+    dueTime: text("due_time"),
+    isAllDay: integer("is_all_day", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    // Recurrence rule JSON (Phase 3).
+    repeatJson: text("repeat_json"),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    // Real so we can insert between two rows without renumbering.
+    position: real("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    index("todos_user_status").on(t.userId, t.status),
+    index("todos_user_list").on(t.userId, t.listId),
+    index("todos_user_due").on(t.userId, t.dueDate),
+    index("todos_parent").on(t.parentId),
+  ],
+);

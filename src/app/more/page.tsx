@@ -6,6 +6,7 @@ import {
   BookOpen,
   ChevronRight,
   Users,
+  ListTodo,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/context";
@@ -20,6 +21,12 @@ type MoreItem = {
 };
 
 const items: MoreItem[] = [
+  {
+    href: "/todo",
+    label: "Todo",
+    description: "Lists, due dates, priorities — quick natural-language capture.",
+    Icon: ListTodo,
+  },
   {
     href: "/insights",
     label: "Insights",
