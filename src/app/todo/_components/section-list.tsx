@@ -23,10 +23,14 @@ export function SectionList({
   tagsByTodo,
   today,
   reorderable,
+  selectMode,
+  selectedIds,
+  onSelect,
   onToggle,
   onOpen,
   onPriority,
   onPin,
+  onDelete,
   onReorder,
 }: {
   listId: string;
@@ -37,10 +41,14 @@ export function SectionList({
   tagsByTodo: Record<string, TodoTag[]>;
   today: string;
   reorderable: boolean;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onSelect?: (id: string) => void;
   onToggle: (t: Todo) => void;
   onOpen: (t: Todo) => void;
   onPriority: (t: Todo, p: number) => void;
   onPin: (t: Todo) => void;
+  onDelete?: (t: Todo) => void;
   onReorder: (orderedIds: string[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -63,10 +71,14 @@ export function SectionList({
     today,
     showList: false,
     reorderable,
+    selectMode,
+    selectedIds,
+    onSelect,
     onToggle,
     onOpen,
     onPriority,
     onPin,
+    onDelete,
     onReorder,
   };
 

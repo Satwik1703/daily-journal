@@ -1593,7 +1593,18 @@ Client-only — no schema change.
 
 **Verified local:** tsc clean · lint 0 errors · build clean · filters 13/13 · DB smoke (persist + rules roundtrip, 0 FK violations).
 
-**Parts remaining (planned):** 8 bulk actions + swipe gestures · 9 pomodoro integration + web push reminders (optional).
+### ✅ Part 8 — Bulk actions + swipe gestures (committed, local only)
+
+Client-only — no schema change.
+
+- **Bulk actions:** header Select toggle (List mode) → multi-select; tapping a row selects instead of opening; `ring` highlight; reorder/row-actions hidden while selecting. `BulkBar` (fixed bottom): Complete · Priority · Due (today/tomorrow/clear) · Move to list · Delete · count + cancel. Each applies the matching mutation across the selection with optimistic overlays. New `handleDelete` (optimistic hide + `delete_todo`).
+- **Swipe gestures** (touch): pointer-based horizontal swipe on a row — right ⇒ complete, left ⇒ delete, past an 80px threshold; reveals a check/trash background; `touch-pan-y` preserves vertical scroll; suppresses the tap that would otherwise open the detail. Disabled in select mode / for mouse.
+
+**Verified local:** tsc clean · lint 0 errors · build clean.
+
+### Todo feature — core complete (Parts 1–8)
+
+All planned core todo functionality is built and committed locally (not pushed). **Deferred / optional (not built):** pomodoro "start focus from task" integration (crosses into `/pomodoro`), web push reminders (VAPID/SW push), Eisenhower/Calendar drag-to-set, duration-bar Gantt. These can be picked up later.
 
 ---
 

@@ -16,7 +16,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks, Repeat } from "lucide-react";
+import { useRef, useState } from "react";
+import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks, Repeat, Trash2 } from "lucide-react";
 import { PriorityMenu, PriorityFlag } from "./priority-menu";
 import { TagChips } from "./tag-picker";
 import { formatShortDate, type DateString } from "@/lib/dates";
@@ -33,10 +34,14 @@ export function TodoListView({
   today,
   showList,
   reorderable,
+  selectMode = false,
+  selectedIds,
+  onSelect,
   onToggle,
   onOpen,
   onPriority,
   onPin,
+  onDelete,
   onReorder,
 }: {
   todos: Todo[];
@@ -46,10 +51,14 @@ export function TodoListView({
   today: DateString;
   showList: boolean;
   reorderable: boolean;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onSelect?: (id: string) => void;
   onToggle: (t: Todo) => void;
   onOpen: (t: Todo) => void;
   onPriority: (t: Todo, p: number) => void;
   onPin: (t: Todo) => void;
+  onDelete?: (t: Todo) => void;
   onReorder: (orderedIds: string[]) => void;
 }) {
   const sensors = useSensors(
@@ -69,8 +78,9 @@ export function TodoListView({
     onReorder(next);
   };
 
+  const canReorder = reorderable && !selectMode;
   const rows = todos.map((t) => (
-    <SortableRow key={t.id} id={t.id} disabled={!reorderable}>
+    <SortableRow key={t.id} id={t.id} disabled={!canReorder}>
       {(handle) => (
         <Row
           todo={t}
@@ -80,16 +90,20 @@ export function TodoListView({
           today={today}
           showList={showList}
           handle={handle}
+          selectMode={selectMode}
+          selected={selectedIds?.has(t.id) ?? false}
+          onSelect={() => onSelect?.(t.id)}
           onToggle={() => onToggle(t)}
           onOpen={() => onOpen(t)}
           onPriority={(p) => onPriority(t, p)}
           onPin={() => onPin(t)}
+          onDelete={onDelete ? () => onDelete(t) : undefined}
         />
       )}
     </SortableRow>
   ));
 
-  if (!reorderable) return <div className="space-y-1.5">{rows}</div>;
+  if (!canReorder) return <div className="space-y-1.5">{rows}</div>;
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -139,10 +153,14 @@ function Row({
   today,
   showList,
   handle,
+  selectMode,
+  selected,
+  onSelect,
   onToggle,
   onOpen,
   onPriority,
   onPin,
+  onDelete,
 }: {
   todo: Todo;
   list: TList | undefined;
@@ -151,12 +169,67 @@ function Row({
   today: DateString;
   showList: boolean;
   handle: HandleProps | null;
+  selectMode: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onToggle: () => void;
   onOpen: () => void;
   onPriority: (p: number) => void;
   onPin: () => void;
+  onDelete?: () => void;
 }) {
   const done = todo.status !== "active";
+
+  // Horizontal swipe: right = complete, left = delete. Disabled in select mode.
+  const [dx, setDx] = useState(0);
+  const startRef = useRef<{ x: number; y: number; active: boolean; swiping: boolean }>({ x: 0, y: 0, active: false, swiping: false });
+  const suppressClick = useRef(false);
+  const SWIPE_TRIGGER = 80;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (selectMode || e.pointerType === "mouse") return;
+    startRef.current = { x: e.clientX, y: e.clientY, active: true, swiping: false };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const s = startRef.current;
+    if (!s.active) return;
+    const ddx = e.clientX - s.x;
+    const ddy = e.clientY - s.y;
+    if (!s.swiping) {
+      if (Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) {
+        s.swiping = true;
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } else if (Math.abs(ddy) > 10) {
+        s.active = false; // vertical scroll — bail
+        return;
+      }
+    }
+    if (s.swiping) setDx(Math.max(-120, Math.min(120, ddx)));
+  };
+  const onPointerUp = () => {
+    const s = startRef.current;
+    if (s.swiping) {
+      if (dx >= SWIPE_TRIGGER) {
+        onToggle();
+        suppressClick.current = true;
+      } else if (dx <= -SWIPE_TRIGGER && onDelete) {
+        onDelete();
+        suppressClick.current = true;
+      }
+    }
+    startRef.current = { x: 0, y: 0, active: false, swiping: false };
+    setDx(0);
+  };
+
+  const guardedOpen = () => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    if (selectMode) onSelect();
+    else onOpen();
+  };
+
   const dueTone = todo.dueDate
     ? todo.dueDate < today
       ? "text-red-500"
@@ -166,31 +239,59 @@ function Row({
     : "text-muted-foreground";
 
   return (
-    <div className="group flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/30">
-      {/* checkbox */}
+    <div className="relative overflow-hidden rounded-lg">
+      {/* swipe action backgrounds */}
+      {dx !== 0 ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-between rounded-lg px-4">
+          <span className={cn("text-primary transition-opacity", dx > 0 ? "opacity-100" : "opacity-0")}>
+            <Check className="size-4" />
+          </span>
+          <span className={cn("text-destructive transition-opacity", dx < 0 ? "opacity-100" : "opacity-0")}>
+            <Trash2 className="size-4" />
+          </span>
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          "group flex touch-pan-y items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/30",
+          selected && "ring-2 ring-primary/50",
+        )}
+        style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+      {/* checkbox / selection */}
       <button
         type="button"
-        aria-label={done ? "Mark active" : "Complete"}
-        onClick={onToggle}
+        aria-label={selectMode ? "Select" : done ? "Mark active" : "Complete"}
+        onClick={selectMode ? onSelect : onToggle}
         className={cn(
           "mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-          done ? "border-transparent bg-primary text-primary-foreground" : "hover:bg-muted",
+          selectMode
+            ? selected
+              ? "border-transparent bg-primary text-primary-foreground"
+              : "border-border hover:bg-muted"
+            : done
+              ? "border-transparent bg-primary text-primary-foreground"
+              : "hover:bg-muted",
         )}
         style={
-          !done && todo.priority > 0
+          !selectMode && !done && todo.priority > 0
             ? { borderColor: priorityColor(todo.priority) }
-            : !done
+            : !selectMode && !done
               ? { borderColor: "var(--border)" }
               : undefined
         }
       >
-        {done ? <Check className="size-3" /> : null}
+        {(selectMode ? selected : done) ? <Check className="size-3" /> : null}
       </button>
 
       {/* body */}
       <button
         type="button"
-        onClick={onOpen}
+        onClick={guardedOpen}
         className="min-w-0 flex-1 text-left outline-none"
       >
         <div
@@ -239,32 +340,35 @@ function Row({
       </button>
 
       {/* actions */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        <PriorityMenu value={todo.priority} onChange={onPriority}>
-          <span className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-            <PriorityFlag priority={todo.priority} showNone />
-          </span>
-        </PriorityMenu>
-        <button
-          type="button"
-          aria-label={todo.pinned ? "Unpin" : "Pin"}
-          onClick={onPin}
-          className={cn(
-            "flex size-7 items-center justify-center rounded-md hover:bg-muted",
-            todo.pinned ? "text-amber-500" : "text-muted-foreground opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <Star className="size-3.5" fill={todo.pinned ? "currentColor" : "none"} />
-        </button>
-        {handle ? (
-          <span
-            {...handle}
-            aria-label="Drag to reorder"
-            className="flex size-7 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-muted active:cursor-grabbing group-hover:opacity-100"
+      {!selectMode ? (
+        <div className="flex shrink-0 items-center gap-0.5">
+          <PriorityMenu value={todo.priority} onChange={onPriority}>
+            <span className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+              <PriorityFlag priority={todo.priority} showNone />
+            </span>
+          </PriorityMenu>
+          <button
+            type="button"
+            aria-label={todo.pinned ? "Unpin" : "Pin"}
+            onClick={onPin}
+            className={cn(
+              "flex size-7 items-center justify-center rounded-md hover:bg-muted",
+              todo.pinned ? "text-amber-500" : "text-muted-foreground opacity-0 group-hover:opacity-100",
+            )}
           >
-            <GripVertical className="size-3.5" />
-          </span>
-        ) : null}
+            <Star className="size-3.5" fill={todo.pinned ? "currentColor" : "none"} />
+          </button>
+          {handle ? (
+            <span
+              {...handle}
+              aria-label="Drag to reorder"
+              className="flex size-7 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-muted active:cursor-grabbing group-hover:opacity-100"
+            >
+              <GripVertical className="size-3.5" />
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       </div>
     </div>
   );

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Menu, ClipboardList, Search } from "lucide-react";
+import { Menu, ClipboardList, Search, CheckSquare } from "lucide-react";
 import { nanoid } from "nanoid";
 import { Button } from "@/components/ui/button";
 import { mutate } from "@/lib/sync/mutate";
 import { useCachedPage } from "@/lib/sync/cache";
 import { parseQuickAdd } from "@/lib/todo/quick-parse";
-import { addDays, todayLocal } from "@/lib/dates";
+import { addDays, todayLocal, type DateString } from "@/lib/dates";
 import {
   parseViewParam,
   sortTodos,
@@ -30,6 +30,7 @@ import { FilterBuilderDialog } from "./filter-builder-dialog";
 import { SortMenu } from "./sort-menu";
 import { SearchSheet } from "./search-sheet";
 import { ViewModeMenu, type RenderMode } from "./view-mode-menu";
+import { BulkBar } from "./bulk-bar";
 import { CalendarView } from "./calendar-view";
 import { KanbanView } from "./kanban-view";
 import { EisenhowerView } from "./eisenhower-view";
@@ -63,6 +64,8 @@ export function TodoClient({ view }: { view: string }) {
   const [editingTag, setEditingTag] = useState<TodoTag | null>(null);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [editingFilter, setEditingFilter] = useState<TodoFilter | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [sort, setSort] = useState<TodoSort>("manual");
   const [mode, setMode] = useState<RenderMode>("list");
@@ -109,6 +112,8 @@ export function TodoClient({ view }: { view: string }) {
     setHidden(new Set());
     setStatusOverride(new Map());
     setReorderIds(null);
+    setSelectMode(false);
+    setSelectedIds(new Set());
   }, [view]);
 
   // Desktop keyboard shortcuts. Ignored while typing in a field (Esc still blurs).
@@ -308,9 +313,59 @@ export function TodoClient({ view }: { view: string }) {
     void mutate("reorder_todos", { orderedIds });
   };
 
+  const handleDelete = (t: Todo) => {
+    setHidden((h) => new Set(h).add(t.id));
+    void mutate("delete_todo", { id: t.id });
+  };
+
   const openDetail = (t: Todo) => {
     setDetail(t);
     setDetailOpen(true);
+  };
+
+  // ----- bulk -----
+  const toggleSelect = (id: string) =>
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+  const selectedTodos = () => visible.filter((t) => selectedIds.has(t.id));
+  const bulkComplete = () => {
+    setStatusOverride((m) => {
+      const next = new Map(m);
+      for (const t of selectedTodos()) if (t.status === "active") next.set(t.id, "done");
+      return next;
+    });
+    for (const t of selectedTodos()) if (t.status === "active") void mutate("toggle_todo", { id: t.id });
+    exitSelect();
+  };
+  const bulkDelete = () => {
+    const ids = [...selectedIds];
+    setHidden((h) => {
+      const next = new Set(h);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) void mutate("delete_todo", { id });
+    exitSelect();
+  };
+  const bulkPriority = (p: number) => {
+    for (const id of selectedIds) void mutate("update_todo", { id, priority: p });
+    exitSelect();
+  };
+  const bulkDue = (d: DateString | null) => {
+    for (const id of selectedIds) void mutate("update_todo", { id, dueDate: d });
+    exitSelect();
+  };
+  const bulkMove = (listId: string | null) => {
+    for (const id of selectedIds) void mutate("move_todo_to_list", { id, listId });
+    exitSelect();
   };
 
   // Keep the open detail sheet in sync with refreshed data.
@@ -343,6 +398,16 @@ export function TodoClient({ view }: { view: string }) {
         </Button>
         {!isCompleted ? <ViewModeMenu value={mode} onChange={changeMode} /> : null}
         {effectiveMode === "list" ? <SortMenu value={sort} onChange={changeSort} /> : null}
+        {effectiveMode === "list" ? (
+          <Button
+            size="icon-sm"
+            variant={selectMode ? "secondary" : "ghost"}
+            aria-label={selectMode ? "Exit selection" : "Select tasks"}
+            onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          >
+            <CheckSquare />
+          </Button>
+        ) : null}
       </div>
 
       {!isCompleted ? (
@@ -380,6 +445,10 @@ export function TodoClient({ view }: { view: string }) {
               onOpen={openDetail}
               onPriority={handlePriority}
               onPin={handlePin}
+              onDelete={handleDelete}
+              selectMode={selectMode}
+              selectedIds={selectedIds}
+              onSelect={toggleSelect}
               onReorder={handleReorder}
             />
           </>
@@ -397,6 +466,10 @@ export function TodoClient({ view }: { view: string }) {
             onOpen={openDetail}
             onPriority={handlePriority}
             onPin={handlePin}
+            onDelete={handleDelete}
+            selectMode={selectMode}
+            selectedIds={selectedIds}
+            onSelect={toggleSelect}
             onReorder={handleReorder}
           />
         )
@@ -415,9 +488,26 @@ export function TodoClient({ view }: { view: string }) {
           onOpen={openDetail}
           onPriority={handlePriority}
           onPin={handlePin}
+          onDelete={handleDelete}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onSelect={toggleSelect}
           onReorder={handleReorder}
         />
       )}
+
+      {selectMode && selectedIds.size > 0 ? (
+        <BulkBar
+          count={selectedIds.size}
+          lists={lists}
+          onComplete={bulkComplete}
+          onPriority={bulkPriority}
+          onDue={bulkDue}
+          onMove={bulkMove}
+          onDelete={bulkDelete}
+          onClose={exitSelect}
+        />
+      ) : null}
 
       <ViewSwitcher
         open={switcherOpen}
