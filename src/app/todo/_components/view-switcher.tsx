@@ -17,11 +17,13 @@ import {
   CheckCircle2,
   Plus,
   Pencil,
+  Hash,
 } from "lucide-react";
 import {
   SMART_VIEWS,
   type SmartView,
   type TodoList,
+  type TodoTag,
   type TodoViewCounts,
 } from "@/lib/todo/todo-meta";
 import { cn } from "@/lib/utils";
@@ -40,17 +42,23 @@ export function ViewSwitcher({
   onOpenChange,
   currentView,
   lists,
+  tags,
   counts,
   onCreateList,
   onEditList,
+  onCreateTag,
+  onEditTag,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   currentView: string;
   lists: TodoList[];
+  tags: TodoTag[];
   counts: TodoViewCounts;
   onCreateList: () => void;
   onEditList: (l: TodoList) => void;
+  onCreateTag: () => void;
+  onEditTag: (t: TodoTag) => void;
 }) {
   const router = useRouter();
   const go = (view: string) => {
@@ -119,6 +127,30 @@ export function ViewSwitcher({
                   onEdit={() => onEditList(l)}
                 />
               ))}
+          </div>
+
+          <div className="mt-4 mb-1 flex items-center justify-between px-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
+              Tags
+            </span>
+            <Button size="icon-xs" variant="ghost" aria-label="New tag" onClick={onCreateTag}>
+              <Plus />
+            </Button>
+          </div>
+          <div className="space-y-0.5">
+            {tags.length === 0 ? (
+              <p className="px-2 py-1 text-xs text-muted-foreground">No tags yet.</p>
+            ) : null}
+            {tags.map((t) => (
+              <Row
+                key={t.id}
+                active={currentView === `tag-${t.id}`}
+                onClick={() => go(`tag-${t.id}`)}
+                icon={<Hash className="size-4" style={{ color: t.color }} />}
+                label={t.name}
+                onEdit={() => onEditTag(t)}
+              />
+            ))}
           </div>
         </div>
       </SheetContent>

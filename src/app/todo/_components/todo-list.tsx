@@ -18,8 +18,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks } from "lucide-react";
 import { PriorityMenu, PriorityFlag } from "./priority-menu";
+import { TagChips } from "./tag-picker";
 import { formatShortDate, type DateString } from "@/lib/dates";
-import type { Todo, TodoList as TList } from "@/lib/todo/todo-meta";
+import type { Todo, TodoList as TList, TodoTag } from "@/lib/todo/todo-meta";
 import { cn } from "@/lib/utils";
 
 export type SubtaskCounts = Record<string, { done: number; total: number }>;
@@ -28,6 +29,7 @@ export function TodoListView({
   todos,
   listsById,
   subtasks,
+  tagsByTodo,
   today,
   showList,
   reorderable,
@@ -40,6 +42,7 @@ export function TodoListView({
   todos: Todo[];
   listsById: Map<string, TList>;
   subtasks: SubtaskCounts;
+  tagsByTodo: Record<string, TodoTag[]>;
   today: DateString;
   showList: boolean;
   reorderable: boolean;
@@ -73,6 +76,7 @@ export function TodoListView({
           todo={t}
           list={t.listId ? listsById.get(t.listId) : undefined}
           progress={subtasks[t.id]}
+          tags={tagsByTodo[t.id]}
           today={today}
           showList={showList}
           handle={handle}
@@ -131,6 +135,7 @@ function Row({
   todo,
   list,
   progress,
+  tags,
   today,
   showList,
   handle,
@@ -142,6 +147,7 @@ function Row({
   todo: Todo;
   list: TList | undefined;
   progress: { done: number; total: number } | undefined;
+  tags: TodoTag[] | undefined;
   today: DateString;
   showList: boolean;
   handle: HandleProps | null;
@@ -195,7 +201,7 @@ function Row({
         >
           {todo.title}
         </div>
-        {(todo.dueDate || (progress && progress.total > 0) || (showList && list)) && (
+        {(todo.dueDate || (progress && progress.total > 0) || (showList && list) || (tags && tags.length > 0)) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
             {todo.dueDate ? (
               <span className={cn("inline-flex items-center gap-1", dueTone)}>
@@ -226,6 +232,7 @@ function Row({
                 {list.name}
               </span>
             ) : null}
+            {tags && tags.length ? <TagChips tags={tags} /> : null}
           </div>
         )}
       </button>

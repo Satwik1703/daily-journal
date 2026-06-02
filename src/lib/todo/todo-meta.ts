@@ -40,6 +40,13 @@ export interface TodoList {
   position: number;
 }
 
+export interface TodoTag {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+}
+
 // ---- Priority ----
 
 export const PRIORITY_META: Record<
@@ -84,13 +91,18 @@ export function isSmartView(v: string): v is SmartView {
 /** Parse a [view] route param into a structured target. */
 export type ViewTarget =
   | { kind: "smart"; view: SmartView }
-  | { kind: "list"; listId: string };
+  | { kind: "list"; listId: string }
+  | { kind: "tag"; tagId: string };
 
 export function parseViewParam(raw: string): ViewTarget | null {
   if (isSmartView(raw)) return { kind: "smart", view: raw };
   if (raw.startsWith("list-")) {
     const listId = raw.slice("list-".length);
     if (listId) return { kind: "list", listId };
+  }
+  if (raw.startsWith("tag-")) {
+    const tagId = raw.slice("tag-".length);
+    if (tagId) return { kind: "tag", tagId };
   }
   return null;
 }
@@ -116,10 +128,55 @@ export interface TodoViewCounts {
 export interface TodoPageData {
   view: string;
   lists: TodoList[];
+  tags: TodoTag[];
+  tagsByTodo: Record<string, TodoTag[]>;
   todos: Todo[]; // top-level todos for the view
   subtasks: Record<string, { done: number; total: number }>;
   counts: TodoViewCounts;
   today: DateString;
+}
+
+// ---- Sort ----
+
+export type TodoSort = "manual" | "due" | "priority" | "title" | "created";
+
+export const SORT_OPTIONS: { key: TodoSort; label: string }[] = [
+  { key: "manual", label: "Manual" },
+  { key: "due", label: "Due date" },
+  { key: "priority", label: "Priority" },
+  { key: "title", label: "Title" },
+  { key: "created", label: "Date added" },
+];
+
+function cmpDue(a: Todo, b: Todo): number {
+  if (a.dueDate === b.dueDate) return 0;
+  if (!a.dueDate) return 1;
+  if (!b.dueDate) return -1;
+  return a.dueDate < b.dueDate ? -1 : 1;
+}
+
+/** Sort a copy of `rows` by the given mode. Pinned-first is applied separately. */
+export function sortTodos(rows: Todo[], mode: TodoSort): Todo[] {
+  const out = [...rows];
+  switch (mode) {
+    case "due":
+      out.sort((a, b) => cmpDue(a, b) || b.priority - a.priority || a.position - b.position);
+      break;
+    case "priority":
+      out.sort((a, b) => b.priority - a.priority || cmpDue(a, b) || a.position - b.position);
+      break;
+    case "title":
+      out.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case "created":
+      out.sort((a, b) => b.createdAt - a.createdAt);
+      break;
+    case "manual":
+    default:
+      out.sort((a, b) => a.position - b.position);
+      break;
+  }
+  return out;
 }
 
 /** Whether a top-level active todo belongs in a given smart view. */

@@ -5,6 +5,9 @@ import {
   getActiveTodos,
   getCompletedTodos,
   getSubtaskCounts,
+  getTags,
+  getTagsByTodo,
+  getTodoIdsForTag,
 } from "@/db/queries/todo";
 import { addDays, todayLocal } from "@/lib/dates";
 import {
@@ -33,10 +36,12 @@ export async function GET(
   const tomorrow = addDays(today, 1);
   const next7End = addDays(today, 6);
 
-  const [lists, active, subtasks] = await Promise.all([
+  const [lists, active, subtasks, tags, tagsByTodo] = await Promise.all([
     getLists(userId),
     getActiveTodos(userId),
     getSubtaskCounts(userId),
+    getTags(userId),
+    getTagsByTodo(userId),
   ]);
 
   // Top-level active todos drive the main list + all counts.
@@ -62,6 +67,9 @@ export async function GET(
     viewTodos = topActive.filter((t) =>
       todoMatchesSmartView(t, target.view, today, tomorrow, next7End),
     );
+  } else if (target.kind === "tag") {
+    const ids = await getTodoIdsForTag(userId, target.tagId);
+    viewTodos = topActive.filter((t) => ids.has(t.id));
   } else {
     viewTodos = topActive.filter((t) => t.listId === target.listId);
   }
@@ -69,6 +77,8 @@ export async function GET(
   const payload: TodoPageData = {
     view,
     lists,
+    tags,
+    tagsByTodo,
     todos: viewTodos,
     subtasks,
     counts,

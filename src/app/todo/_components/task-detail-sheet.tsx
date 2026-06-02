@@ -28,20 +28,26 @@ import {
 import { mutate } from "@/lib/sync/mutate";
 import { nanoid } from "nanoid";
 import { formatShortDate, type DateString } from "@/lib/dates";
-import { priorityMeta, type Todo, type TodoList } from "@/lib/todo/todo-meta";
+import { priorityMeta, type Todo, type TodoList, type TodoTag } from "@/lib/todo/todo-meta";
 import { DueDatePopover } from "./due-date-popover";
 import { PriorityMenu } from "./priority-menu";
+import { TagPicker } from "./tag-picker";
+import { Hash } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function TaskDetailSheet({
   todo,
   lists,
+  allTags,
+  initialTags,
   today,
   open,
   onOpenChange,
 }: {
   todo: Todo | null;
   lists: TodoList[];
+  allTags: TodoTag[];
+  initialTags: TodoTag[];
   today: DateString;
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -53,6 +59,7 @@ export function TaskDetailSheet({
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [listId, setListId] = useState<string | null>(null);
   const [status, setStatus] = useState<Todo["status"]>("active");
+  const [tags, setTags] = useState<TodoTag[]>([]);
   const [subtasks, setSubtasks] = useState<Todo[]>([]);
   const [newSub, setNewSub] = useState("");
 
@@ -66,6 +73,7 @@ export function TaskDetailSheet({
     setDueTime(todo.dueTime);
     setListId(todo.listId);
     setStatus(todo.status);
+    setTags(initialTags);
     setSubtasks([]);
     // Fetch subtasks lazily.
     let cancelled = false;
@@ -106,6 +114,10 @@ export function TaskDetailSheet({
   const setListNow = (lid: string | null) => {
     setListId(lid);
     void mutate("move_todo_to_list", { id, listId: lid });
+  };
+  const setTagsNow = (next: TodoTag[]) => {
+    setTags(next);
+    void mutate("set_todo_tags", { todoId: id, tagIds: next.map((t) => t.id) });
   };
   const toggleDone = () => {
     const next = status === "active" ? "done" : "active";
@@ -241,6 +253,13 @@ export function TaskDetailSheet({
                   ))}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <TagPicker allTags={allTags} selected={tags} onChange={setTagsNow}>
+              <AttrChip active={tags.length > 0}>
+                <Hash className="size-3.5" />
+                {tags.length ? tags.map((t) => t.name).join(", ") : "Tags"}
+              </AttrChip>
+            </TagPicker>
           </div>
 
           {/* note */}

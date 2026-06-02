@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Menu, ClipboardList } from "lucide-react";
+import { Menu, ClipboardList, Search } from "lucide-react";
 import { nanoid } from "nanoid";
 import { Button } from "@/components/ui/button";
 import { mutate } from "@/lib/sync/mutate";
@@ -10,16 +10,22 @@ import { parseQuickAdd } from "@/lib/todo/quick-parse";
 import { addDays, todayLocal } from "@/lib/dates";
 import {
   parseViewParam,
+  sortTodos,
   SMART_VIEWS,
   type Todo,
   type TodoList,
+  type TodoTag,
   type TodoPageData,
+  type TodoSort,
 } from "@/lib/todo/todo-meta";
 import { QuickAdd } from "./quick-add";
 import { TodoListView } from "./todo-list";
 import { TaskDetailSheet } from "./task-detail-sheet";
 import { ViewSwitcher } from "./view-switcher";
 import { ListFormDialog } from "./list-form-dialog";
+import { TagFormDialog } from "./tag-form-dialog";
+import { SortMenu } from "./sort-menu";
+import { SearchSheet } from "./search-sheet";
 
 const EMPTY_COUNTS = { today: 0, tomorrow: 0, next7: 0, inbox: 0, all: 0, byList: {} };
 
@@ -45,6 +51,28 @@ export function TodoClient({ view }: { view: string }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [listDialogOpen, setListDialogOpen] = useState(false);
   const [editingList, setEditingList] = useState<TodoList | null>(null);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [editingTag, setEditingTag] = useState<TodoTag | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [sort, setSort] = useState<TodoSort>("manual");
+
+  // Per-view sort, persisted in localStorage.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`todo-sort:${view}`);
+      setSort(saved && saved.length ? (saved as TodoSort) : "manual");
+    } catch {
+      setSort("manual");
+    }
+  }, [view]);
+  const changeSort = (s: TodoSort) => {
+    setSort(s);
+    try {
+      localStorage.setItem(`todo-sort:${view}`, s);
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Reset overlays whenever the view changes.
   useEffect(() => {
@@ -107,21 +135,26 @@ export function TodoClient({ view }: { view: string }) {
       return st === "active";
     });
 
-    if (reorderIds) {
+    if (sort === "manual" && reorderIds) {
       const order = new Map(reorderIds.map((id, i) => [id, i]));
       rows = [...rows].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    } else if (sort !== "manual") {
+      rows = sortTodos(rows, sort);
     }
     // Pinned float to top (stable otherwise).
     rows = [...rows].sort((a, b) => Number(b.pinned) - Number(a.pinned));
     return rows;
-  }, [data, added, hidden, statusOverride, reorderIds, isCompleted]);
+  }, [data, added, hidden, statusOverride, reorderIds, isCompleted, sort]);
 
   // ----- view meta -----
   const list = target?.kind === "list" ? listsById.get(target.listId) : undefined;
+  const tag = target?.kind === "tag" ? (data?.tags ?? []).find((t) => t.id === target.tagId) : undefined;
   const title =
     target?.kind === "list"
       ? (list?.name ?? "List")
-      : (SMART_VIEWS.find((v) => v.key === (target?.kind === "smart" ? target.view : ""))?.label ?? "Todo");
+      : target?.kind === "tag"
+        ? `#${tag?.name ?? "tag"}`
+        : (SMART_VIEWS.find((v) => v.key === (target?.kind === "smart" ? target.view : ""))?.label ?? "Todo");
   const hint =
     target?.kind === "smart"
       ? SMART_VIEWS.find((v) => v.key === target.view)?.hint
@@ -146,10 +179,7 @@ export function TodoClient({ view }: { view: string }) {
       );
       if (match) listId = match.id;
     }
-    // Phase 1 has no tag storage — keep them in the title so nothing is lost.
-    const title = parsed.tags.length
-      ? `${parsed.title} ${parsed.tags.map((t) => `#${t}`).join(" ")}`.trim()
-      : parsed.title;
+    const title = parsed.title;
     if (!title) return;
 
     const id = nanoid(12);
@@ -180,6 +210,7 @@ export function TodoClient({ view }: { view: string }) {
       priority: parsed.priority,
       dueDate,
       dueTime: parsed.dueTime,
+      tagNames: parsed.tags.length ? parsed.tags : undefined,
     });
   };
 
@@ -217,9 +248,11 @@ export function TodoClient({ view }: { view: string }) {
   const count =
     target?.kind === "list"
       ? (data?.counts.byList[target.listId] ?? visible.length)
-      : isCompleted
+      : target?.kind === "tag"
         ? visible.length
-        : (data?.counts[(target?.kind === "smart" ? target.view : "all") as keyof typeof EMPTY_COUNTS] as number ?? visible.length);
+        : isCompleted
+          ? visible.length
+          : (data?.counts[(target?.kind === "smart" ? target.view : "all") as keyof typeof EMPTY_COUNTS] as number ?? visible.length);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-4">
@@ -232,8 +265,12 @@ export function TodoClient({ view }: { view: string }) {
           {hint ? <p className="truncate text-xs text-muted-foreground">{hint}</p> : null}
         </div>
         {typeof count === "number" && count > 0 ? (
-          <span className="text-sm tabular-nums text-muted-foreground">{count}</span>
+          <span className="mr-1 text-sm tabular-nums text-muted-foreground">{count}</span>
         ) : null}
+        <Button size="icon-sm" variant="ghost" aria-label="Search" onClick={() => setSearchOpen(true)}>
+          <Search />
+        </Button>
+        <SortMenu value={sort} onChange={changeSort} />
       </div>
 
       {!isCompleted ? (
@@ -258,9 +295,10 @@ export function TodoClient({ view }: { view: string }) {
           todos={visible}
           listsById={listsById}
           subtasks={data.subtasks}
+          tagsByTodo={data.tagsByTodo}
           today={today}
           showList={target?.kind !== "list"}
-          reorderable={!isCompleted}
+          reorderable={!isCompleted && sort === "manual"}
           onToggle={handleToggle}
           onOpen={openDetail}
           onPriority={handlePriority}
@@ -274,6 +312,7 @@ export function TodoClient({ view }: { view: string }) {
         onOpenChange={setSwitcherOpen}
         currentView={view}
         lists={lists}
+        tags={data?.tags ?? []}
         counts={data?.counts ?? EMPTY_COUNTS}
         onCreateList={() => {
           setEditingList(null);
@@ -285,13 +324,27 @@ export function TodoClient({ view }: { view: string }) {
           setSwitcherOpen(false);
           setListDialogOpen(true);
         }}
+        onCreateTag={() => {
+          setEditingTag(null);
+          setSwitcherOpen(false);
+          setTagDialogOpen(true);
+        }}
+        onEditTag={(t) => {
+          setEditingTag(t);
+          setSwitcherOpen(false);
+          setTagDialogOpen(true);
+        }}
       />
 
       <ListFormDialog open={listDialogOpen} onOpenChange={setListDialogOpen} editing={editingList} />
+      <TagFormDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} editing={editingTag} />
+      <SearchSheet open={searchOpen} onOpenChange={setSearchOpen} onPick={openDetail} />
 
       <TaskDetailSheet
         todo={detailLive}
         lists={lists}
+        allTags={data?.tags ?? []}
+        initialTags={detail ? (data?.tagsByTodo[detail.id] ?? []) : []}
         today={today}
         open={detailOpen}
         onOpenChange={(o) => {

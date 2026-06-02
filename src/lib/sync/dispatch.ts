@@ -80,6 +80,10 @@ import {
   updateList,
   deleteList,
   reorderLists,
+  createTag,
+  updateTag,
+  deleteTag,
+  setTodoTags,
 } from "@/app/actions/todo";
 import {
   createSplit,
@@ -217,6 +221,10 @@ export const DISPATCH: Record<string, AnyAction> = {
   update_list: updateList,
   delete_list: (args: { id: string }) => deleteList(args.id),
   reorder_lists: reorderLists,
+  create_tag: createTag,
+  update_tag: updateTag,
+  delete_tag: (args: { id: string }) => deleteTag(args.id),
+  set_todo_tags: setTodoTags,
 };
 
 export type MutationKind = keyof typeof DISPATCH;

@@ -1,7 +1,13 @@
 import { db } from "@/db/client";
-import { todos, todoLists } from "@/db/schema";
+import { todos, todoLists, todoTags, todoTagLinks } from "@/db/schema";
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
-import type { Todo, TodoList, TodoViewMode, TodoListKind } from "@/lib/todo/todo-meta";
+import type {
+  Todo,
+  TodoList,
+  TodoViewMode,
+  TodoListKind,
+  TodoTag,
+} from "@/lib/todo/todo-meta";
 
 function rowTodo(r: typeof todos.$inferSelect): Todo {
   return {
@@ -130,6 +136,99 @@ export async function getSubtaskCounts(
     out[r.parentId] = { done: Number(r.done) || 0, total: Number(r.total) || 0 };
   }
   return out;
+}
+
+// ---- Tags ----
+
+function rowTag(r: typeof todoTags.$inferSelect): TodoTag {
+  return { id: r.id, name: r.name, color: r.color, position: r.position };
+}
+
+export async function getTags(userId: string): Promise<TodoTag[]> {
+  const rows = await db
+    .select()
+    .from(todoTags)
+    .where(eq(todoTags.userId, userId))
+    .orderBy(asc(todoTags.position), asc(todoTags.nameLower));
+  return rows.map(rowTag);
+}
+
+/** Map todoId → tags, for all the user's todos. */
+export async function getTagsByTodo(userId: string): Promise<Record<string, TodoTag[]>> {
+  const rows = await db
+    .select({
+      todoId: todoTagLinks.todoId,
+      id: todoTags.id,
+      name: todoTags.name,
+      color: todoTags.color,
+      position: todoTags.position,
+    })
+    .from(todoTagLinks)
+    .innerJoin(todoTags, eq(todoTagLinks.tagId, todoTags.id))
+    .where(eq(todoTagLinks.userId, userId))
+    .orderBy(asc(todoTags.position));
+  const out: Record<string, TodoTag[]> = {};
+  for (const r of rows) {
+    (out[r.todoId] ??= []).push({ id: r.id, name: r.name, color: r.color, position: r.position });
+  }
+  return out;
+}
+
+export async function getTodoIdsForTag(userId: string, tagId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ todoId: todoTagLinks.todoId })
+    .from(todoTagLinks)
+    .where(and(eq(todoTagLinks.userId, userId), eq(todoTagLinks.tagId, tagId)));
+  return new Set(rows.map((r) => r.todoId));
+}
+
+export async function findTagById(userId: string, id: string): Promise<TodoTag | null> {
+  const rows = await db
+    .select()
+    .from(todoTags)
+    .where(and(eq(todoTags.id, id), eq(todoTags.userId, userId)))
+    .limit(1);
+  return rows[0] ? rowTag(rows[0]) : null;
+}
+
+export async function nextTagPosition(userId: string): Promise<number> {
+  const rows = await db
+    .select({ p: todoTags.position })
+    .from(todoTags)
+    .where(eq(todoTags.userId, userId))
+    .orderBy(desc(todoTags.position))
+    .limit(1);
+  return (rows[0]?.p ?? -1) + 1;
+}
+
+/** Resolve tag names to ids, creating any that don't exist (case-insensitive). */
+export async function resolveTagNames(userId: string, names: string[]): Promise<string[]> {
+  const clean = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (clean.length === 0) return [];
+  const existing = await db
+    .select()
+    .from(todoTags)
+    .where(eq(todoTags.userId, userId));
+  const byLower = new Map(existing.map((t) => [t.nameLower, t.id]));
+  const ids: string[] = [];
+  let pos = (existing.reduce((mx, t) => Math.max(mx, t.position), -1)) + 1;
+  const PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#ec4899", "#84cc16"];
+  for (const name of clean) {
+    const lower = name.toLowerCase();
+    const hit = byLower.get(lower);
+    if (hit) {
+      ids.push(hit);
+      continue;
+    }
+    const { nanoid } = await import("nanoid");
+    const id = nanoid(12);
+    const color = PALETTE[pos % PALETTE.length];
+    await db.insert(todoTags).values({ id, userId, name, nameLower: lower, color, position: pos });
+    byLower.set(lower, id);
+    ids.push(id);
+    pos += 1;
+  }
+  return ids;
 }
 
 export async function findListById(userId: string, id: string): Promise<TodoList | null> {

@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db/client";
-import { todos, todoLists } from "@/db/schema";
+import { todos, todoLists, todoTags, todoTagLinks } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
@@ -15,7 +15,9 @@ import {
 import {
   nextTodoPosition,
   nextListPosition,
+  nextTagPosition,
   findTodoById,
+  resolveTagNames,
 } from "@/db/queries/todo";
 
 function revalidate() {
@@ -63,6 +65,20 @@ function sanitizeDueTime(raw: unknown): string | null {
 
 // ---- Todos ----
 
+/** Replace a todo's tag links with the given tag ids. */
+async function applyTodoTags(userId: string, todoId: string, tagIds: string[]): Promise<void> {
+  await db
+    .delete(todoTagLinks)
+    .where(and(eq(todoTagLinks.userId, userId), eq(todoTagLinks.todoId, todoId)));
+  const unique = [...new Set(tagIds)].filter(Boolean);
+  if (unique.length) {
+    await db
+      .insert(todoTagLinks)
+      .values(unique.map((tagId) => ({ userId, todoId, tagId })))
+      .onConflictDoNothing();
+  }
+}
+
 export async function createTodo(input: {
   id?: string;
   title: string;
@@ -73,6 +89,8 @@ export async function createTodo(input: {
   dueDate?: string | null;
   dueTime?: string | null;
   pinned?: boolean;
+  tagNames?: string[];
+  tagIds?: string[];
 }): Promise<{ id: string }> {
   const { user } = await requireUser();
   const title = sanitizeTitle(input.title);
@@ -118,6 +136,14 @@ export async function createTodo(input: {
         updatedAt: new Date(),
       },
     });
+
+  // Tags: explicit ids + resolved names (create missing).
+  const tagIds = [...(input.tagIds ?? [])];
+  if (input.tagNames?.length) {
+    tagIds.push(...(await resolveTagNames(user.id, input.tagNames)));
+  }
+  if (tagIds.length) await applyTodoTags(user.id, id, tagIds);
+
   revalidate();
   return { id };
 }
@@ -327,5 +353,96 @@ export async function reorderLists(input: { orderedIds: string[] }): Promise<voi
         .where(and(eq(todoLists.id, input.orderedIds[i]), eq(todoLists.userId, user.id)));
     }
   });
+  revalidate();
+}
+
+// ---- Tags ----
+
+function sanitizeTagName(raw: unknown): string {
+  if (typeof raw !== "string") throw new Error("name must be a string");
+  const s = raw.trim().replace(/^#/, "");
+  if (!s) throw new Error("Tag name required");
+  if (s.length > 40) throw new Error("Tag name too long");
+  return s;
+}
+
+export async function createTag(input: {
+  id?: string;
+  name: string;
+  color?: string;
+}): Promise<{ id: string }> {
+  const { user } = await requireUser();
+  const name = sanitizeTagName(input.name);
+  const nameLower = name.toLowerCase();
+  // Reuse an existing tag with the same name (case-insensitive).
+  const existing = await db
+    .select()
+    .from(todoTags)
+    .where(and(eq(todoTags.userId, user.id), eq(todoTags.nameLower, nameLower)))
+    .limit(1);
+  if (existing[0]) {
+    if (input.color) {
+      await db
+        .update(todoTags)
+        .set({ color: input.color })
+        .where(eq(todoTags.id, existing[0].id));
+    }
+    revalidate();
+    return { id: existing[0].id };
+  }
+  const id = input.id ?? nanoid(12);
+  const position = await nextTagPosition(user.id);
+  await db
+    .insert(todoTags)
+    .values({ id, userId: user.id, name, nameLower, color: input.color || "#64748b", position })
+    .onConflictDoNothing();
+  revalidate();
+  return { id };
+}
+
+export async function updateTag(input: {
+  id: string;
+  name?: string;
+  color?: string;
+}): Promise<void> {
+  if (!input.id) throw new Error("id required");
+  const { user } = await requireUser();
+  const set: Partial<typeof todoTags.$inferInsert> = {};
+  if (input.name !== undefined) {
+    const name = sanitizeTagName(input.name);
+    set.name = name;
+    set.nameLower = name.toLowerCase();
+  }
+  if (input.color !== undefined) set.color = input.color;
+  if (Object.keys(set).length === 0) return;
+  await db
+    .update(todoTags)
+    .set(set)
+    .where(and(eq(todoTags.id, input.id), eq(todoTags.userId, user.id)));
+  revalidate();
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  if (!id) throw new Error("id required");
+  const { user } = await requireUser();
+  // Links cascade via FK.
+  await db.delete(todoTags).where(and(eq(todoTags.id, id), eq(todoTags.userId, user.id)));
+  revalidate();
+}
+
+export async function setTodoTags(input: {
+  todoId: string;
+  tagIds?: string[];
+  tagNames?: string[];
+}): Promise<void> {
+  if (!input.todoId) throw new Error("todoId required");
+  const { user } = await requireUser();
+  const todo = await findTodoById(user.id, input.todoId);
+  if (!todo) throw new Error("todo not found");
+  const tagIds = [...(input.tagIds ?? [])];
+  if (input.tagNames?.length) {
+    tagIds.push(...(await resolveTagNames(user.id, input.tagNames)));
+  }
+  await applyTodoTags(user.id, input.todoId, tagIds);
   revalidate();
 }

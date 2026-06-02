@@ -649,3 +649,39 @@ export const todos = sqliteTable(
     index("todos_parent").on(t.parentId),
   ],
 );
+
+// Todo tags (Phase 14 Part 2). Many-to-many with todos via todo_tag_links.
+export const todoTags = sqliteTable(
+  "todo_tags",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    // Lowercased copy for case-insensitive uniqueness checks.
+    nameLower: text("name_lower").notNull(),
+    color: text("color").notNull().default("#64748b"),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("todo_tags_user").on(t.userId, t.nameLower)],
+);
+
+export const todoTagLinks = sqliteTable(
+  "todo_tag_links",
+  {
+    userId: text("user_id").notNull(),
+    todoId: text("todo_id")
+      .notNull()
+      .references((): AnySQLiteColumn => todos.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references((): AnySQLiteColumn => todoTags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.todoId, t.tagId] }),
+    index("todo_tag_links_tag").on(t.tagId),
+    index("todo_tag_links_user").on(t.userId),
+  ],
+);

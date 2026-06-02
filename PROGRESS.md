@@ -1535,7 +1535,17 @@ Offline-first todo manager: lists + Inbox, smart lists, quick-add NLP, prioritie
 
 **Verified local:** tsc clean · lint 0 errors (warnings only, existing set-state-in-effect pattern) · build clean (26 routes) · parser 15/15 · DB smoke (subtask group-by, list-delete→Inbox fallback, 0 FK violations).
 
-**Parts remaining (planned):** 2 organize & power (tags, folders, sections, sort, search, filters, swipe, bulk) · 3 recurrence engine · 4 views (calendar/kanban/eisenhower) · 5 timeline + pomodoro integration + shortcuts · 6 web push reminders (optional).
+### ✅ Part 2 — Tags + Sort + Search (committed, local only)
+
+**Schema** (`0017_todo_tags.sql`, applied local — additive, 0 FK violations both cascade directions): `todo_tags` (id/userId/name/nameLower/color/position) + `todo_tag_links` (userId/todoId/tagId, PK(todoId,tagId), FKs cascade both ways).
+
+- **Tags:** normalized many-to-many. `#tag` in quick-add now stored (resolveTagNames creates missing, case-insensitive dedup). Tag chips on rows + in detail; `TagPicker` popover (search/create/toggle) in the detail sheet; tag smart-view `tag-<id>`; Tags section in the switcher with create/edit (`TagFormDialog` — rename/recolor/delete, links cascade). Backend: `createTag/updateTag/deleteTag/setTodoTags` + `resolveTagNames`; queries `getTags/getTagsByTodo/getTodoIdsForTag`; payload gains `tags` + `tagsByTodo`; dispatch + cacheKeys extended.
+- **Sort:** per-view, persisted in `localStorage` (`todo-sort:<view>`). Modes: Manual / Due date / Priority / Title / Date added (`sortTodos` in todo-meta). Header sort menu. Drag-reorder auto-disabled unless Manual. Pinned still float to top.
+- **Search:** header search → `SearchSheet` querying the full active set (`/api/page/todo/all`), live title/note filter, tap result → opens detail.
+
+**Verified local:** tsc clean · lint 0 errors · build clean · DB smoke (tag links, both-direction cascade, 0 FK violations).
+
+**Parts remaining (planned):** 3 folders + sections · 4 recurrence engine · 5 views (calendar/kanban/eisenhower) · 6 timeline + pomodoro integration + shortcuts · 7 filters (advanced AND/OR) + swipe + bulk · 8 web push reminders (optional).
 
 ---
 
