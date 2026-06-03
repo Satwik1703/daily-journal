@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useRef, useState } from "react";
-import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks, Repeat, Trash2 } from "lucide-react";
+import { GripVertical, Calendar as CalIcon, Clock, Star, Check, ListChecks, Repeat } from "lucide-react";
 import { PriorityMenu, PriorityFlag } from "./priority-menu";
 import { TagChips } from "./tag-picker";
 import { formatShortDate, type DateString } from "@/lib/dates";
@@ -42,6 +42,7 @@ export function TodoListView({
   onPriority,
   onPin,
   onDelete,
+  onReschedule,
   onReorder,
 }: {
   todos: Todo[];
@@ -59,6 +60,7 @@ export function TodoListView({
   onPriority: (t: Todo, p: number) => void;
   onPin: (t: Todo) => void;
   onDelete?: (t: Todo) => void;
+  onReschedule?: (t: Todo) => void;
   onReorder: (orderedIds: string[]) => void;
 }) {
   const sensors = useSensors(
@@ -98,6 +100,7 @@ export function TodoListView({
           onPriority={(p) => onPriority(t, p)}
           onPin={() => onPin(t)}
           onDelete={onDelete ? () => onDelete(t) : undefined}
+          onReschedule={onReschedule ? () => onReschedule(t) : undefined}
         />
       )}
     </SortableRow>
@@ -161,6 +164,7 @@ function Row({
   onPriority,
   onPin,
   onDelete,
+  onReschedule,
 }: {
   todo: Todo;
   list: TList | undefined;
@@ -177,17 +181,18 @@ function Row({
   onPriority: (p: number) => void;
   onPin: () => void;
   onDelete?: () => void;
+  onReschedule?: () => void;
 }) {
   const done = todo.status !== "active";
 
-  // Horizontal swipe: right = complete, left = delete. Disabled in select mode.
+  // Horizontal swipe: right = complete, left = reschedule. Disabled in select mode.
   const [dx, setDx] = useState(0);
   const startRef = useRef<{ x: number; y: number; active: boolean; swiping: boolean }>({ x: 0, y: 0, active: false, swiping: false });
   const suppressClick = useRef(false);
   const SWIPE_TRIGGER = 80;
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (selectMode || e.pointerType === "mouse") return;
+    if (selectMode) return;
     startRef.current = { x: e.clientX, y: e.clientY, active: true, swiping: false };
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -212,8 +217,8 @@ function Row({
       if (dx >= SWIPE_TRIGGER) {
         onToggle();
         suppressClick.current = true;
-      } else if (dx <= -SWIPE_TRIGGER && onDelete) {
-        onDelete();
+      } else if (dx <= -SWIPE_TRIGGER && onReschedule) {
+        onReschedule();
         suppressClick.current = true;
       }
     }
@@ -240,14 +245,14 @@ function Row({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* swipe action backgrounds */}
+      {/* swipe action backgrounds: right = complete, left = reschedule */}
       {dx !== 0 ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-between rounded-lg px-4">
           <span className={cn("text-primary transition-opacity", dx > 0 ? "opacity-100" : "opacity-0")}>
             <Check className="size-4" />
           </span>
-          <span className={cn("text-destructive transition-opacity", dx < 0 ? "opacity-100" : "opacity-0")}>
-            <Trash2 className="size-4" />
+          <span className={cn("text-amber-500 transition-opacity", dx < 0 ? "opacity-100" : "opacity-0")}>
+            <CalIcon className="size-4" />
           </span>
         </div>
       ) : null}

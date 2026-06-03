@@ -39,7 +39,8 @@ import { TimelineView } from "./timeline-view";
 const EMPTY_COUNTS = { today: 0, tomorrow: 0, next7: 0, inbox: 0, all: 0, byList: {} };
 
 export function TodoClient({ view }: { view: string }) {
-  const data = useCachedPage<TodoPageData | null>(`todo:${view}`, null, async () => {
+  // `v2` namespace bump flushes any stale-shaped cache from earlier builds.
+  const data = useCachedPage<TodoPageData | null>(`todo:v2:${view}`, null, async () => {
     const res = await fetch(`/api/page/todo/${view}`, { cache: "no-store" });
     if (!res.ok) throw new Error("Fetch failed");
     return (await res.json()) as TodoPageData;
@@ -175,6 +176,10 @@ export function TodoClient({ view }: { view: string }) {
   }, [data]);
 
   const lists = useMemo(() => data?.lists ?? [], [data]);
+  // Defensive defaults — a stale IndexedDB cache from an earlier build may lack
+  // newer payload fields (tagsByTodo/subtasks), and indexing undefined[id] crashes.
+  const tagsByTodo = useMemo(() => data?.tagsByTodo ?? {}, [data]);
+  const subtasksMap = useMemo(() => data?.subtasks ?? {}, [data]);
   const listsById = useMemo(() => {
     const m = new Map<string, TodoList>();
     for (const l of lists) m.set(l.id, l);
@@ -318,6 +323,12 @@ export function TodoClient({ view }: { view: string }) {
     void mutate("delete_todo", { id: t.id });
   };
 
+  // Swipe-left reschedule: no due → tomorrow; has due → +1 day.
+  const handleReschedule = (t: Todo) => {
+    const next = t.dueDate ? addDays(t.dueDate, 1) : addDays(today, 1);
+    void mutate("update_todo", { id: t.id, dueDate: next });
+  };
+
   const openDetail = (t: Todo) => {
     setDetail(t);
     setDetailOpen(true);
@@ -411,7 +422,7 @@ export function TodoClient({ view }: { view: string }) {
       </div>
 
       {!isCompleted ? (
-        <QuickAdd today={today} lists={lists} onSubmit={handleAdd} inputRef={quickAddRef} />
+        <QuickAdd today={today} lists={lists} tags={data?.tags ?? []} onSubmit={handleAdd} inputRef={quickAddRef} />
       ) : null}
 
       {data == null ? (
@@ -437,8 +448,8 @@ export function TodoClient({ view }: { view: string }) {
               sections={sections}
               todos={visible}
               listsById={listsById}
-              subtasks={data.subtasks}
-              tagsByTodo={data.tagsByTodo}
+              subtasks={subtasksMap}
+              tagsByTodo={tagsByTodo}
               today={today}
               reorderable={sort === "manual"}
               onToggle={handleToggle}
@@ -446,6 +457,7 @@ export function TodoClient({ view }: { view: string }) {
               onPriority={handlePriority}
               onPin={handlePin}
               onDelete={handleDelete}
+              onReschedule={handleReschedule}
               selectMode={selectMode}
               selectedIds={selectedIds}
               onSelect={toggleSelect}
@@ -458,8 +470,8 @@ export function TodoClient({ view }: { view: string }) {
             sections={sections}
             todos={visible}
             listsById={listsById}
-            subtasks={data.subtasks}
-            tagsByTodo={data.tagsByTodo}
+            subtasks={subtasksMap}
+            tagsByTodo={tagsByTodo}
             today={today}
             reorderable={sort === "manual"}
             onToggle={handleToggle}
@@ -467,6 +479,7 @@ export function TodoClient({ view }: { view: string }) {
             onPriority={handlePriority}
             onPin={handlePin}
             onDelete={handleDelete}
+            onReschedule={handleReschedule}
             selectMode={selectMode}
             selectedIds={selectedIds}
             onSelect={toggleSelect}
@@ -479,8 +492,8 @@ export function TodoClient({ view }: { view: string }) {
         <TodoListView
           todos={visible}
           listsById={listsById}
-          subtasks={data.subtasks}
-          tagsByTodo={data.tagsByTodo}
+          subtasks={subtasksMap}
+          tagsByTodo={tagsByTodo}
           today={today}
           showList
           reorderable={!isCompleted && sort === "manual"}
@@ -489,6 +502,7 @@ export function TodoClient({ view }: { view: string }) {
           onPriority={handlePriority}
           onPin={handlePin}
           onDelete={handleDelete}
+          onReschedule={handleReschedule}
           selectMode={selectMode}
           selectedIds={selectedIds}
           onSelect={toggleSelect}
@@ -569,7 +583,7 @@ export function TodoClient({ view }: { view: string }) {
         todo={detailLive}
         lists={lists}
         allTags={data?.tags ?? []}
-        initialTags={detail ? (data?.tagsByTodo[detail.id] ?? []) : []}
+        initialTags={detail ? (tagsByTodo[detail.id] ?? []) : []}
         sections={sections}
         today={today}
         open={detailOpen}

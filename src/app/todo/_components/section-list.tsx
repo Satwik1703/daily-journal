@@ -31,6 +31,7 @@ export function SectionList({
   onPriority,
   onPin,
   onDelete,
+  onReschedule,
   onReorder,
 }: {
   listId: string;
@@ -49,6 +50,7 @@ export function SectionList({
   onPriority: (t: Todo, p: number) => void;
   onPin: (t: Todo) => void;
   onDelete?: (t: Todo) => void;
+  onReschedule?: (t: Todo) => void;
   onReorder: (orderedIds: string[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -79,6 +81,7 @@ export function SectionList({
     onPriority,
     onPin,
     onDelete,
+    onReschedule,
     onReorder,
   };
 

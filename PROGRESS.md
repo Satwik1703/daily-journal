@@ -1602,7 +1602,18 @@ Client-only — no schema change.
 
 **Verified local:** tsc clean · lint 0 errors · build clean.
 
-### Todo feature — core complete (Parts 1–8)
+### ✅ Part 9 — bug fixes + quick-add UX (committed, local only)
+
+Client-only — no schema change. Fixes from first user test pass.
+
+- **`/todo/today` crash** (`Cannot read properties of undefined`): a stale IndexedDB cache from the Part-1 build lacked newer payload fields (`tagsByTodo`/`subtasks`), so `undefined[todoId]` threw on first render. Fixed with defensive defaults (`?? {}`) at every consumption site **and** a cache-key namespace bump (`todo:` → `todo:v2:`) to flush stale-shaped entries.
+- **Quick-add live autocomplete:** typing a token now opens a suggestion dropdown — `~` → lists, `#` → tags (+ "Create …"), `!` → priority. Enter/click completes the token inline. Preview chips for list/priority are clickable to re-open their picker.
+- **Recurrence preview chip:** quick-add now shows a Repeat chip (e.g. "Weekly on Mon") as you type `every monday`/`daily`/… — previously the rule was only applied silently on create.
+- **Swipe fixed + repurposed:** swipe now works with mouse too (was touch-only, so it did nothing on desktop). **Left swipe = reschedule** (no due → tomorrow; has due → +1 day) instead of delete; right swipe still completes. Background icons updated (check / calendar).
+
+**Verified local:** tsc clean · lint 0 errors · build clean.
+
+### Todo feature — core complete (Parts 1–9)
 
 All planned core todo functionality is built and committed locally (not pushed). **Deferred / optional (not built):** pomodoro "start focus from task" integration (crosses into `/pomodoro`), web push reminders (VAPID/SW push), Eisenhower/Calendar drag-to-set, duration-bar Gantt. These can be picked up later.
 
