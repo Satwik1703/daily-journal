@@ -6,7 +6,15 @@ import { parseQuickAdd } from "@/lib/todo/quick-parse";
 import { describeRule, parseRule } from "@/lib/todo/recurrence";
 import { priorityMeta, type TodoList, type TodoTag } from "@/lib/todo/todo-meta";
 import { formatShortDate, type DateString } from "@/lib/dates";
+import { DueDatePopover } from "./due-date-popover";
+import { RepeatEditor } from "./repeat-editor";
 import { cn } from "@/lib/utils";
+
+export type QuickAddExtra = {
+  dueDate?: DateString | null;
+  dueTime?: string | null;
+  repeat?: string | null;
+};
 
 type Suggestion = { id: string; label: string; insert: string; color?: string; hint?: string };
 
@@ -29,16 +37,22 @@ export function QuickAdd({
   lists: TodoList[];
   tags: TodoTag[];
   placeholder?: string;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, extra?: QuickAddExtra) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
   const localRef = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? localRef;
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
+  // Chip-set overrides (win over parsed values). null entry = "not overridden".
+  const [dueOv, setDueOv] = useState<{ date: DateString | null; time: string | null } | null>(null);
+  const [repeatOv, setRepeatOv] = useState<{ json: string | null } | null>(null);
 
   const parsed = text.trim() ? parseQuickAdd(text, today) : null;
-  const rule = parsed?.repeat ? parseRule(parsed.repeat) : null;
+  const effDate = dueOv ? dueOv.date : (parsed?.dueDate ?? null);
+  const effTime = dueOv ? dueOv.time : (parsed?.dueTime ?? null);
+  const effRepeat = repeatOv ? repeatOv.json : (parsed?.repeat ?? null);
+  const rule = effRepeat ? parseRule(effRepeat) : null;
   const listName =
     parsed?.listName &&
     lists.find((l) => l.name.toLowerCase() === parsed.listName!.toLowerCase())?.name;
@@ -109,14 +123,22 @@ export function QuickAdd({
   const submit = () => {
     const t = text.trim();
     if (!t) return;
-    onSubmit(t);
+    const extra: QuickAddExtra = {};
+    if (dueOv) {
+      extra.dueDate = dueOv.date;
+      extra.dueTime = dueOv.time;
+    }
+    if (repeatOv) extra.repeat = repeatOv.json;
+    onSubmit(t, extra);
     setText("");
     setCaret(0);
+    setDueOv(null);
+    setRepeatOv(null);
   };
 
   const showSuggest = tokenChar !== null && suggestions.length > 0;
   const showPreview =
-    !showSuggest && parsed && (parsed.priority || parsed.dueDate || parsed.dueTime || listName || parsed.tags.length || rule);
+    !showSuggest && (parsed?.priority || effDate || effTime || listName || parsed?.tags.length || rule);
 
   return (
     <div className="relative rounded-xl border border-border bg-card">
@@ -171,27 +193,31 @@ export function QuickAdd({
       {/* parsed preview chips (clickable where it makes sense) */}
       {showPreview ? (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 px-3 py-1.5 text-[11px]">
-          {parsed!.priority ? (
+          {parsed?.priority ? (
             <button type="button" onClick={() => startToken("!")}>
-              <Chip color={priorityMeta(parsed!.priority).color}>
-                <Flag className="size-3" /> {priorityMeta(parsed!.priority).label}
+              <Chip color={priorityMeta(parsed.priority).color}>
+                <Flag className="size-3" /> {priorityMeta(parsed.priority).label}
               </Chip>
             </button>
           ) : null}
-          {parsed!.dueDate ? (
-            <Chip>
-              <CalIcon className="size-3" /> {formatShortDate(parsed!.dueDate)}
-            </Chip>
-          ) : null}
-          {parsed!.dueTime ? (
-            <Chip>
-              <Clock className="size-3" /> {parsed!.dueTime}
-            </Chip>
+          {effDate ? (
+            <DueDatePopover date={effDate} time={effTime} onChange={(d, t) => setDueOv({ date: d, time: t })}>
+              <Chip>
+                <CalIcon className="size-3" /> {formatShortDate(effDate)}
+                {effTime ? (
+                  <>
+                    <Clock className="size-3" /> {effTime}
+                  </>
+                ) : null}
+              </Chip>
+            </DueDatePopover>
           ) : null}
           {rule ? (
-            <Chip>
-              <Repeat className="size-3" /> {describeRule(rule)}
-            </Chip>
+            <RepeatEditor value={effRepeat} onChange={(j) => setRepeatOv({ json: j })}>
+              <Chip>
+                <Repeat className="size-3" /> {describeRule(rule)}
+              </Chip>
+            </RepeatEditor>
           ) : null}
           {listName ? (
             <button type="button" onClick={() => startToken("~")}>
@@ -200,7 +226,7 @@ export function QuickAdd({
               </Chip>
             </button>
           ) : null}
-          {parsed!.tags.map((t) => (
+          {parsed?.tags.map((t) => (
             <Chip key={t}>
               <Hash className="size-3" /> {t}
             </Chip>

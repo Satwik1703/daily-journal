@@ -1613,7 +1613,16 @@ Client-only — no schema change. Fixes from first user test pass.
 
 **Verified local:** tsc clean · lint 0 errors · build clean.
 
-### Todo feature — core complete (Parts 1–9)
+### ✅ Part 10 — quick-add chip polish + swipe animations (committed, local only)
+
+Client-only — no schema change.
+
+- **Calendar + Repeat chips clickable** in quick-add (parity with priority/list): the date chip opens `DueDatePopover`, the repeat chip opens `RepeatEditor`. Picks are stored as overrides that win over the parsed text and flow through on submit (`QuickAddExtra` → `handleAdd` merge). Date chip now shows date + time together.
+- **Swipe animations:** during a swipe the action background **fills** from the edge (width tracks the drag), the icon **ramps** (opacity + scale with progress), the fill **brightens** once past the trigger (armed state), and the row **springs back** smoothly (transition-transform when not actively dragging; no transition while following the finger).
+
+**Verified local:** tsc clean · lint 0 errors · build clean.
+
+### Todo feature — core complete (Parts 1–10)
 
 All planned core todo functionality is built and committed locally (not pushed). **Deferred / optional (not built):** pomodoro "start focus from task" integration (crosses into `/pomodoro`), web push reminders (VAPID/SW push), Eisenhower/Calendar drag-to-set, duration-bar Gantt. These can be picked up later.
 

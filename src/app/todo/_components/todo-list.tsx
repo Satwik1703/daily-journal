@@ -187,9 +187,12 @@ function Row({
 
   // Horizontal swipe: right = complete, left = reschedule. Disabled in select mode.
   const [dx, setDx] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const startRef = useRef<{ x: number; y: number; active: boolean; swiping: boolean }>({ x: 0, y: 0, active: false, swiping: false });
   const suppressClick = useRef(false);
   const SWIPE_TRIGGER = 80;
+  const swipeProgress = Math.min(Math.abs(dx) / SWIPE_TRIGGER, 1); // 0..1
+  const armed = Math.abs(dx) >= SWIPE_TRIGGER;
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (selectMode) return;
@@ -203,13 +206,18 @@ function Row({
     if (!s.swiping) {
       if (Math.abs(ddx) > 8 && Math.abs(ddx) > Math.abs(ddy)) {
         s.swiping = true;
+        setDragging(true);
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       } else if (Math.abs(ddy) > 10) {
         s.active = false; // vertical scroll — bail
         return;
       }
     }
-    if (s.swiping) setDx(Math.max(-120, Math.min(120, ddx)));
+    if (s.swiping) {
+      // Slight rubber-banding past the trigger so it feels springy.
+      const clamped = Math.max(-140, Math.min(140, ddx));
+      setDx(clamped);
+    }
   };
   const onPointerUp = () => {
     const s = startRef.current;
@@ -223,6 +231,7 @@ function Row({
       }
     }
     startRef.current = { x: 0, y: 0, active: false, swiping: false };
+    setDragging(false);
     setDx(0);
   };
 
@@ -245,21 +254,40 @@ function Row({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* swipe action backgrounds: right = complete, left = reschedule */}
-      {dx !== 0 ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-between rounded-lg px-4">
-          <span className={cn("text-primary transition-opacity", dx > 0 ? "opacity-100" : "opacity-0")}>
-            <Check className="size-4" />
-          </span>
-          <span className={cn("text-amber-500 transition-opacity", dx < 0 ? "opacity-100" : "opacity-0")}>
-            <CalIcon className="size-4" />
-          </span>
+      {/* swipe action fills: right = complete (green), left = reschedule (amber) */}
+      {dx > 0 ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-y-0 left-0 flex items-center rounded-lg pl-4 transition-colors",
+            armed ? "bg-primary/30" : "bg-primary/15",
+          )}
+          style={{ width: Math.max(0, dx) }}
+        >
+          <Check
+            className="size-4 text-primary"
+            style={{ opacity: Math.min(dx / 24, 1), transform: `scale(${0.6 + 0.6 * swipeProgress})` }}
+          />
+        </div>
+      ) : null}
+      {dx < 0 ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end rounded-lg pr-4 transition-colors",
+            armed ? "bg-amber-500/30" : "bg-amber-500/15",
+          )}
+          style={{ width: Math.max(0, -dx) }}
+        >
+          <CalIcon
+            className="size-4 text-amber-500"
+            style={{ opacity: Math.min(-dx / 24, 1), transform: `scale(${0.6 + 0.6 * swipeProgress})` }}
+          />
         </div>
       ) : null}
       <div
         className={cn(
-          "group flex touch-pan-y items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/30",
+          "group flex touch-pan-y items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-muted/30",
           selected && "ring-2 ring-primary/50",
+          dragging ? "transition-none" : "transition-transform duration-200 ease-out",
         )}
         style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
         onPointerDown={onPointerDown}

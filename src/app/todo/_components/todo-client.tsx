@@ -236,10 +236,13 @@ export function TodoClient({ view }: { view: string }) {
         : undefined;
 
   // ----- handlers -----
-  const handleAdd = (text: string) => {
+  const handleAdd = (text: string, extra?: { dueDate?: DateString | null; dueTime?: string | null; repeat?: string | null }) => {
     const parsed = parseQuickAdd(text, today);
+    // Chip overrides win over parsed values.
+    const dueTime = extra && "dueTime" in extra ? extra.dueTime ?? null : parsed.dueTime;
+    const repeat = extra && "repeat" in extra ? extra.repeat ?? null : parsed.repeat;
     // Defaults from the active view.
-    let dueDate = parsed.dueDate;
+    let dueDate = extra && "dueDate" in extra ? extra.dueDate ?? null : parsed.dueDate;
     let listId: string | null = null;
     if (target?.kind === "list") listId = target.listId;
     if (target?.kind === "smart") {
@@ -267,9 +270,9 @@ export function TodoClient({ view }: { view: string }) {
       status: "active",
       completedAt: null,
       dueDate,
-      dueTime: parsed.dueTime,
-      isAllDay: !parsed.dueTime,
-      repeatJson: null,
+      dueTime,
+      isAllDay: !dueTime,
+      repeatJson: repeat ?? null,
       pinned: false,
       position: 9_999,
       createdAt: Date.now(),
@@ -282,9 +285,9 @@ export function TodoClient({ view }: { view: string }) {
       listId,
       priority: parsed.priority,
       dueDate,
-      dueTime: parsed.dueTime,
+      dueTime,
       tagNames: parsed.tags.length ? parsed.tags : undefined,
-      repeatJson: parsed.repeat ?? undefined,
+      repeatJson: repeat ?? undefined,
     });
   };
 
