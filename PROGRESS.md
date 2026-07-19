@@ -1663,6 +1663,77 @@ Shipped 2026-07-19. Migration-first session after ~7-week gap; user shifted deve
 
 ---
 
+## ✅ Phase 15 — Auth-aware fetch + `/reset` escape hatch (bug fixes)
+
+Shipped 2026-07-19 same session as Phase 14 · Ship. User-reported bugs on installed PWA.
+
+### Bugs
+
+1. **"Opening the app after a long time doesn't load, stays there. I have to manually clear the cache and refresh to get redirected to login."**
+2. **"Sometimes it says not authorized error, but it doesn't redirect to login page — stays there. Manual cache clear only fix."**
+
+### Root cause (shared)
+
+Every `/api/page/*` + `/api/sync` endpoint returns **401** when the session cookie is missing or expired. Every page-client fetcher was:
+```ts
+const res = await fetch(`/api/page/...`, { cache: "no-store" });
+if (!res.ok) throw new Error("Fetch failed");
+```
+`useCachedPage.refresh()` (`src/lib/sync/cache.ts:98`) catches the throw silently. Middleware auth gate (`src/middleware.ts`) only fires on navigations, never XHRs. Result: user stared at either stale IDB-hydrated data (bug 2) or a permanent skeleton (bug 1) with no path to recovery except DevTools "Clear storage".
+
+### Shipped
+
+- **`src/lib/sync/auth-fetch.ts`** — `authAwareFetch(input, init)` wraps `fetch`. On 401, hard-navigates to `/auth/login?next=<current>` and returns a never-resolving promise so downstream `throw` + `setState` don't run against a doomed tree. Guards against redirect loops on `/auth/*` and `/reset` by passing 401s through verbatim there.
+- **All 10 page-client fetchers swapped** to `authAwareFetch`: `habits-page-client`, `goals-page-client`, `pomodoro-page-client`, `journal-page-client`, `todo-client`, `task-detail-sheet`, `books-page-client`, `gym/[date] gym-page-client`, `gym/insights insights-page-client`.
+- **`src/lib/sync/mutate.ts`** — `attemptSend`, `flushQueue`, `retryOne` all use `authAwareFetch` too. Any leftover queued mutation that hits an expired session now triggers the same redirect flow instead of dumping a "Sync failed: Unauthorized" toast into the void.
+- **`src/components/sync-bootstrap.tsx`** — skips the sync-conflict toast when the error is `Unauthorized` / `HTTP 401` (page is already redirecting; toast would be noise). Also opts out entirely on `/auth/*` and `/reset` via `usePathname()` so it doesn't race the IDB wipe.
+- **`src/components/device-nickname-dialog.tsx`** — skips `/reset` too.
+
+### Escape hatch — `/reset`
+
+For the "stale even after a normal page reload, now what?" case:
+
+- **New public route `/reset`** (`src/app/reset/page.tsx`) — client page that:
+  1. Enumerates every `habit_log_sync*` IndexedDB via `indexedDB.databases()` (Safari fallback uses the pre-Phase-12 legacy name + the current-user namespaced DB from `localStorage.__habit_log_uid`)
+  2. Deletes them all (handles `onblocked` by resolving so the flow never hangs)
+  3. Clears the `__habit_log_uid` localStorage key
+  4. Unregisters every SW registration
+  5. Deletes every Cache Storage entry
+  6. Hard-navigates to `/auth/login`
+- **Middleware** (`src/middleware.ts:15`) — `/reset` added to `PUBLIC_EXACT` so it always resolves without a session.
+- **Settings → Sync status → "Reset local state" button** — same action behind a confirm dialog. Uses the shared `src/lib/sync/reset-local.ts` helper.
+- **Discoverability:** the button copy tells the user they can also type `/reset` in the address bar anytime the app is frozen. That URL now works from any device state — even mid-logout — because middleware skips auth for it.
+
+### PWA
+
+`public/sw.js` `VERSION` bumped `habit-log-v16 → v17`. `SHELL` extended with `/reset`. Installed phones activate the new SW on next lifecycle.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 56 warnings (all pre-existing `react-hooks/set-state-in-effect` + 3 pre-existing unused-directive; no new categories).
+- Prod probes post-deploy (`dpl_Bso87fbT8PBGYfgrxbVAYs3Dpuma` READY):
+  - `/` → 307 (middleware auth gate)
+  - `/auth/login` → 200
+  - `/reset` → 200 (new; public per middleware)
+
+### Deploy
+
+- `git push origin main` — `05a4dd6..373b192`.
+- `vercel --prod --yes` from `Habit_Log/` — build clean.
+- No schema migration.
+
+### Won't-fix in this phase
+
+- **True offline state** — if the network is fully unreachable AND there's no IDB cache, users still see a skeleton (nothing to redirect *to*). Would need an "offline empty state" per client shell. Deferred as a separate feature, not a bug — pre-Phase-15 behavior was identical.
+
+**State at session end (2026-07-19):**
+- Local + remote `main` at `373b192`.
+- Prod on Phase 15 deploy `dpl_Bso87fbT8PBGYfgrxbVAYs3Dpuma`.
+- PWA shell `habit-log-v17`.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
