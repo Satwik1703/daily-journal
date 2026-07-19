@@ -87,6 +87,23 @@ Commit `drizzle/migrations/*.sql` files — they're the source of truth.
 
 Service worker at `public/sw.js` ships a `VERSION` constant — **bump it on every deploy that touches the shell**, otherwise installed phones serve a stale shell. The `SHELL` array lists every top-level route. On `localhost` the SW does NOT register (actively unregisters + clears caches) so Turbopack-rebuilt chunks aren't served stale during dev. Current version: check the constant in `public/sw.js`.
 
+## Bottom nav — long-press cycling
+
+The bottom nav shows 5 tabs: **Journal · Habits · Pomodoro · Goals · More**. Two of them are *cycling slots* — long-press (500ms) swaps the tab's identity persistently:
+
+- **Journal ↔ Gym** — long-press the Journal tab to swap it to Gym. Short-tap now goes to Gym. Long-press again to cycle back.
+- **Habits ↔ Todo** — same, swaps between Habits and Todo.
+
+Long-press fires a portal-rendered ripple that expands from the tapped icon to cover the viewport as the new page loads under it. Alt-icon ghost in the corner of each cycling tab shows the "other side" (dims idle, brightens on hold).
+
+Mode persists in `localStorage` (`__habit_log_bn_modes`) and auto-aligns to the current pathname (deep links, back button, `/reset` return — the tab always reflects where you are).
+
+## When the app is stuck
+
+Type **`/reset`** into the address bar (or Settings → Sync status → "Reset local state"). Wipes every scrap of client-side state — IndexedDB (`habit_log_sync*`), all service worker registrations, all Cache Storage entries, `localStorage.__habit_log_uid` — then hard-navigates to `/auth/login`. Middleware treats `/reset` as public so it always resolves, even mid-logout.
+
+Also: 401 responses from `/api/page/*` and `/api/sync` now hard-redirect to `/auth/login?next=<current>` via `src/lib/sync/auth-fetch.ts`. If you see a "Sync failed: Unauthorized" toast the page has already navigated — that toast is suppressed on public routes.
+
 ## Project conventions
 
 See [`AGENTS.md`](./AGENTS.md) for the load-bearing rules — local-time date convention, `'use server'` async-only exports, Server↔Client import boundary (rule #7), Map serialization (rule #8), SVG animation transform-box (rule #9), and more.

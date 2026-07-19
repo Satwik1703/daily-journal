@@ -1727,10 +1727,147 @@ For the "stale even after a normal page reload, now what?" case:
 
 - **True offline state** — if the network is fully unreachable AND there's no IDB cache, users still see a skeleton (nothing to redirect *to*). Would need an "offline empty state" per client shell. Deferred as a separate feature, not a bug — pre-Phase-15 behavior was identical.
 
-**State at session end (2026-07-19):**
-- Local + remote `main` at `373b192`.
-- Prod on Phase 15 deploy `dpl_Bso87fbT8PBGYfgrxbVAYs3Dpuma`.
-- PWA shell `habit-log-v17`.
+---
+
+## ✅ Phase 15.1 — /auth/switch runtime error + Goals tab slow load
+
+Same-day follow-ups after the Phase 15 base ship. Two more user-reported bugs.
+
+### Bug A — `/auth/switch` threw on every hit
+
+The previous implementation was a Server Component `page.tsx` calling `destroySession()`, which itself calls `cookies().delete()`. Next 15+ disallows cookie mutation during Server Component render (only Server Actions, Route Handlers, and Middleware may mutate cookies). Every hit to `/auth/switch` errored.
+
+**Fix:** deleted `src/app/auth/switch/page.tsx`, added `src/app/auth/switch/route.ts` as a plain GET handler that destroys the session and returns `NextResponse.redirect('/auth/login')`. `/more` still links via `<a href="/auth/switch">` which is a normal GET nav.
+
+### Bug B — Goals tab very slow
+
+Two hot paths in `src/db/queries/goals.ts` were doing more sequential Turso round-trips than needed.
+
+- **`getGoalsHistory` parallelized.** Was iterating 5 prior periods sequentially, each triggering a full `getGoalsForPeriod` round-trip (200-500ms each on a remote replica). Replaced the for-loop with `Promise.all` — cuts the history strip's contribution from ~1-2.5s to ~250-500ms.
+- **`autoExtendReverseCascadeTrees` skips past-week reads.** Auto-extend was firing on every week-period read including each of the 5 history calls. For historical weeks it always fell into the "lastKey >= nextWeekKey → continue" short-circuit but STILL made the yearlies fetch + per-yearly select before doing so. Now guarded to only run when `periodKey >= todayLocal()`'s week key. Saves ~4 round-trips per page load without changing behavior.
+
+Verified: tsc clean · lint 0 errors, 56 warnings (pre-existing). Prod probes: `/auth/switch` → 307 (before: 500), all other routes unchanged. Deploy `dpl_GSV27DEfAHcRuXYCE32mUGSTJFcr`.
+
+---
+
+## ✅ Phase 15.2 — Gym: race between log_set INSERT and update_set UPDATE
+
+User: *"When I click Add Set, it adds my previous set (prefill), and if I make any changes to it, it's not reflecting. I have to wait until the API call is done, then edits work."*
+
+### Root cause
+
+Flow before fix:
+
+```
+T=0     Tap Add Set → onLocalSets([...sets, optimistic])  (set X visible)
+                    → mutate('log_set', ...) POST starts
+T=50    Tap +/- on new row → persist(patch) → 800ms debounce timer
+T=100   User done
+T=850   Debounce fires → mutate('update_set', ...) POST starts
+```
+
+On slow network (log_set POST > 850ms against Turso), `update_set` arrives at the server first. UPDATE runs against a row that doesn't yet exist → 0 rows affected (silent no-op). Then `log_set` inserts DEFAULT (prefill) values. The user's stepper edit is lost.
+
+Compounded by `dirtySetIdsRef` cleanup: SetRow's `flush()` calls `onFlushed(id)` after firing `update_set`, removing the id from the parent's dirty set. Next refetch overwrites local state with server's default values. User's edit vanishes from the UI too.
+
+### Fix — client-side ordering
+
+- **`mutate()` return type extended** from `{id}` to `{id, done: Promise<boolean>}`. `done` resolves `true` on 2xx / `false` on any failure. Never rejects, so existing fire-and-forget `void mutate(...)` callers still work with no changes.
+- **`gym-page-client.tsx`** owns a `newSetLogPromisesRef: Map<setId, Promise<boolean>>`.
+- **`exercise-card.tsx`'s addSet** captures the `done` promise from `mutate('log_set', ...)` and registers it via `registerNewSetPromise(id, done)`. Also marks the set dirty immediately (was only marked on first stepper tap — an intervening refetch during the network window could roll back the row).
+- **`set-row.tsx`'s flush()** and unmount cleanup, before firing `update_set`, `await` the entry in `newSetLogPromisesRef` for the same id. If it resolves `false` (log_set failed), skip `update_set` entirely (would be orphaned).
+- Map entries clean up in `.finally()` so it doesn't grow unbounded.
+
+Verified: tsc clean · lint 0 errors, 55 warnings. Deploy `dpl_2XA-…` (57vx88tq6 build alias).
+
+---
+
+## ✅ Phase 15.3 — Long-press bottom-nav shortcuts for Gym + Todo
+
+User: *"I want to edit the menu bar. Bring the gym and todo tabs to the menu bar. Keep only 5 icons. Maybe long-press actions?"*
+
+Keeps the bottom nav at 5 tabs but surfaces Gym and Todo via a long-press gesture on adjacent tabs — no `/more` detour needed.
+
+- **Journal long-press → `/gym`**
+- **Habits long-press → `/todo`**
+
+### Gesture handling
+
+- 500ms hold on the tab triggers the alt navigation. Short taps hit the primary href.
+- Pointer move >10px cancels the timer so a scroll-touch doesn't fire.
+- `onClickCapture` swallows the click that follows a long-press so we don't ALSO navigate to the primary href on release.
+- `onContextMenu preventDefault` kills the mobile browser context menu that pops on long-press.
+
+Also: `/reset` now hides the bottom nav (was already hidden on `/auth/*`) to prevent interaction during the reset flow.
+
+---
+
+## ✅ Phase 15.4 — Cycling tab variants + full-viewport ripple
+
+User feedback after 15.3: *"If we switch the tab to Gym by long-pressing, the icon should also change to the tab we're changing to. Now single-press should go to Gym. It's like cycling. And the ring should go from the icon to the entire page."*
+
+Extends long-press from a one-off shortcut to a persistent tab-mode swap with a satisfying transition.
+
+### Cycling variants
+
+- Bottom nav is now modeled as `SLOTS`, each with a `variants[]` array. Slots with 2+ variants long-press-cycle through them.
+- Current setup: `journal-gym` slot has `[Journal, Gym]`, `habits-todo` slot has `[Habits, Todo]`. Pomodoro / Goals / More are single-variant.
+- Long-press advances `(current + 1) % variants.length` and navigates to the new variant. Short-tap always goes to the CURRENT variant, so after a Journal → Gym long-press, a short tap on that slot goes to Gym.
+- Mode index persisted per-slot in `localStorage` (`__habit_log_bn_modes`) so the setting survives refresh + reinstall.
+- **Auto-alignment:** whenever pathname matches a variant of a slot, the mode snaps to that variant. Bookmarks, deep links, back button, `/reset` return — the tab UI always reflects where the user actually is.
+
+### Full-viewport ripple
+
+- On long-press fire, spawn a small ring at the tapped icon's center via a portal into `document.body`. The ring `scale-120`s to cover the viewport over 620ms with an ease-out-expo curve.
+- Border-only + faint tint so the destination page renders through it as the router.push transition happens under.
+- Keyframe `nav-ripple` added inside `@layer utilities` in `globals.css` (per AGENTS.md rule #9).
+
+### Icon/label swap animation
+
+- `key={variant.href}` on the icon + `key={variant.label}` on the text triggers `animate-in fade-in zoom-in-95 duration-150` utilities to run on every variant swap.
+
+---
+
+## ✅ Phase 15.5 — Alt-icon underlay replaces the affordance dot
+
+User: *"What's the purpose of those dots beside the icon?"* → *"A different way. I like the idea of a sim second icon underlay."*
+
+Dot was a mystery affordance. Replaced with a ghost of the slot's OTHER variant icon, layered behind the primary at a small offset and reduced opacity.
+
+- Alt icon (size-4) positioned absolute, offset by 2px right / 2px down from the primary (size-5), at opacity 0.3 idle.
+- On hold: opacity ramps to 0.7 and offset widens to 3px/3px — signals "the alt is coming forward". Primary scales up in parallel.
+- Underlay auto-recomputes as the mode cycles: after swapping Journal to Gym, the ghost becomes the Journal icon (the next cycle target).
+- Non-cycling slots render no underlay.
+
+---
+
+## 📌 State at session end (2026-07-19, Phase 15.5)
+
+- Local + remote `main` at `b665c57`.
+- Prod on Phase 15.5 (bottom-nav alt-icon underlay).
+- PWA shell `habit-log-v17` (SHELL includes `/reset`; no more bumps needed this session).
+- All Phase 15.x deployed to https://daily-journal-phi-vert.vercel.app.
+- Working tree clean.
+
+### Bugs fixed this session (Phase 15.0 → 15.5)
+
+| Phase | Bug | Fix |
+|---|---|---|
+| 15.0 | Cold-open with expired session doesn't redirect to login | `authAwareFetch` wrapper redirects on 401 across 10 page-clients + mutate.ts |
+| 15.0 | Unauthorized error surfaces as sync toast, no redirect | Same wrapper + sync-bootstrap skips 401 toast |
+| 15.0 | No recovery when app is stuck showing stale data | New public `/reset` route + Settings button that wipes IDB + SW + caches |
+| 15.1 | `/auth/switch` errored | Converted from Server Component page to Route Handler (cookies().delete() illegal during Server Component render) |
+| 15.1 | Goals tab very slow | Parallelized history + skipped past-week auto-extend |
+| 15.2 | Gym: Add Set + immediate stepper edit → edit lost | `mutate()` returns `done: Promise<boolean>`; update_set awaits log_set for the same set id |
+| 15.3 | Gym + Todo required `/more` detour | Long-press on Journal / Habits jumps to Gym / Todo |
+| 15.4 | Long-press was one-off, not persistent | Cycling variants + localStorage + full-viewport ripple |
+| 15.5 | Dot affordance was mysterious | Dim alt-icon underlay behind primary |
+
+### Deferred still
+
+- True offline state per client shell (empty state when net dead + no IDB cache)
+- 3D avatar, AI reflections, JSON export/import, fts5 search, level-up toasts, Books polish
+- Pomodoro "focus from task" integration, web push reminders, Eisenhower/Calendar drag-to-set, duration Gantt
 
 ---
 
