@@ -1928,11 +1928,11 @@ Migration + seed script (2), schema.ts update, `src/lib/food-meta.ts`, `src/db/q
 4. `vercel --prod --yes`.
 5. PWA `habit-log-v18` activates on next SW lifecycle.
 
-### Deferred within Phase 16 (surfaced in the ship report)
+### Deferred within Phase 16 → all shipped in the follow-up commit
 
-- **Recipe builder dialog UI** — backend + schema + actions all in place; the user-facing "assemble a dish from ingredients" builder isn't wired yet.
-- **Calendar popover** on the food date stepper (matches journal / habits / goals pattern). Plain chevron stepper for MVP.
-- **Favorite starring on global seed rows** — needs a per-user favorites join table; today only user-owned foods can be starred.
+- **Recipe builder dialog UI** — done. `recipe-builder-dialog.tsx` w/ inline debounced ingredient search, per-item quantity, live totals + per-serving preview. Merged the picker's Custom tab into a `Mine` tab that lists custom foods AND recipes with New buttons for both. Recipes render via a Recipe row w/ emerald pill and log via the existing QuantityDialog flow.
+- **Calendar popover** — done. `food-date-stepper.tsx` now uses the shared `DatePickerPopover`. New `getFoodMonthStatus` in `src/db/queries/food.ts` buckets each day's kcal-vs-target (crazy ±10% / great ±20% / good ±35% / avg way-off) and `fetchFoodMonthStatus` server action widens the month by ±7d. `FOOD_LEGEND` added.
+- **Favorites on seeds** — done. Migration `0022_food_favorites` adds a `food_favorites (user_id, food_id)` join table. All food queries fan-out to `getFavoriteIdSet` in parallel. `favoriteFood` action rewritten to insert/delete on the join table (idempotent). Star button on every food row in the picker (except OFF results). New dispatch alias `toggle_food_favorite`.
 
 ### Standing scope decisions (from the plan)
 
