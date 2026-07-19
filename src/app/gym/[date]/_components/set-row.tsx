@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { Minus, Plus, Trash2, Trophy } from "lucide-react";
 import { mutate } from "@/lib/sync/mutate";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,7 @@ export function SetRow({
   onDelete,
   onDirty,
   onFlushed,
+  newSetLogPromisesRef,
 }: {
   set: WorkoutSet;
   perHand: boolean;
@@ -44,6 +45,13 @@ export function SetRow({
   onDelete: () => void;
   onDirty?: (id: string) => void;
   onFlushed?: (id: string) => void;
+  /**
+   * Map from set-id → Promise resolving to log_set POST success. Populated
+   * by the parent when a set is added via optimistic UI. `flush()` awaits
+   * this before firing `update_set` so a fast stepper edit doesn't race
+   * the row-insert and get silently no-op'd.
+   */
+  newSetLogPromisesRef?: MutableRefObject<Map<string, Promise<boolean>>>;
 }) {
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatchRef = useRef<Partial<WorkoutSet>>({});
@@ -57,7 +65,7 @@ export function SetRow({
     onFlushedRef.current = onFlushed;
   });
 
-  function flush() {
+  async function flush() {
     if (flushTimerRef.current) {
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
@@ -65,8 +73,23 @@ export function SetRow({
     const patch = pendingPatchRef.current;
     pendingPatchRef.current = {};
     if (Object.keys(patch).length === 0) return;
-    void mutate("update_set", { id: setIdRef.current, ...patch });
-    onFlushedRef.current?.(setIdRef.current);
+    const id = setIdRef.current;
+    // If this set was just added via "Add Set" and its log_set POST is
+    // still in flight, wait for the row to actually exist server-side
+    // before firing update_set. Otherwise UPDATE runs against a missing
+    // row (0 rows affected, silent no-op) and the user's stepper edit is
+    // lost the moment the log_set commits with default values.
+    const pending = newSetLogPromisesRef?.current.get(id);
+    if (pending) {
+      const ok = await pending;
+      if (!ok) {
+        // log_set never landed — don't send an orphaned update_set.
+        onFlushedRef.current?.(id);
+        return;
+      }
+    }
+    void mutate("update_set", { id, ...patch });
+    onFlushedRef.current?.(id);
   }
 
   function persist(patch: { reps?: number | null; weightKg?: number | null }) {
@@ -77,8 +100,11 @@ export function SetRow({
     flushTimerRef.current = setTimeout(flush, DEBOUNCE_MS);
   }
 
-  // Flush on unmount (card collapse, row delete, page nav).
+  // Flush on unmount (card collapse, row delete, page nav). Same gating
+  // as flush() — wait for log_set on freshly-added sets before firing
+  // update_set, otherwise unmount races the insert.
   useEffect(() => {
+    const pendingsRef = newSetLogPromisesRef;
     return () => {
       if (flushTimerRef.current) {
         clearTimeout(flushTimerRef.current);
@@ -87,9 +113,22 @@ export function SetRow({
       const patch = pendingPatchRef.current;
       pendingPatchRef.current = {};
       if (Object.keys(patch).length === 0) return;
-      void mutate("update_set", { id: setIdRef.current, ...patch });
-      onFlushedRef.current?.(setIdRef.current);
+      const id = setIdRef.current;
+      const pending = pendingsRef?.current.get(id);
+      const send = async () => {
+        if (pending) {
+          const ok = await pending;
+          if (!ok) {
+            onFlushedRef.current?.(id);
+            return;
+          }
+        }
+        void mutate("update_set", { id, ...patch });
+        onFlushedRef.current?.(id);
+      };
+      void send();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Flush when tab goes to background — keeps prod data fresh even if user

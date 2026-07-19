@@ -110,6 +110,23 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
     dirtySetIdsRef.current.delete(id);
   }, []);
 
+  // Track in-flight `log_set` POSTs for optimistically-added sets. SetRow's
+  // flush() awaits this promise before firing `update_set` for the same id
+  // — otherwise a fast stepper edit right after "Add Set" would race the
+  // insert on the server (update_set arrives first, UPDATE affects 0 rows,
+  // then log_set inserts default values → the user's edit is silently lost).
+  const newSetLogPromisesRef = useRef<Map<string, Promise<boolean>>>(new Map());
+  const registerNewSetPromise = useCallback(
+    (id: string, promise: Promise<boolean>) => {
+      newSetLogPromisesRef.current.set(id, promise);
+      // Clean up once settled so the map doesn't grow unbounded.
+      void promise.finally(() => {
+        newSetLogPromisesRef.current.delete(id);
+      });
+    },
+    [],
+  );
+
   // Sync optimistic state when server data arrives. Crucially, keep local
   // state for any set whose mutate is still queued — otherwise a refetch
   // that lands while the user is hammering the stepper would briefly
@@ -280,6 +297,8 @@ function Loaded({ date, data }: { date: string; data: PageData }) {
               progression={data.progressionSuggestions?.[ex.id]}
               onSetDirty={markSetDirty}
               onSetFlushed={markSetFlushed}
+              newSetLogPromisesRef={newSetLogPromisesRef}
+              registerNewSetPromise={registerNewSetPromise}
               onLocalSets={(next) =>
                 setSets((all) => {
                   const others = all.filter((s) => s.exerciseId !== ex.id);

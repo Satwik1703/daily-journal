@@ -1,7 +1,7 @@
 "use client";
 
 import { customAlphabet } from "nanoid";
-import { useState } from "react";
+import { useState, type MutableRefObject } from "react";
 import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { mutate } from "@/lib/sync/mutate";
@@ -34,6 +34,8 @@ export function ExerciseCard({
   onRemove,
   onSetDirty,
   onSetFlushed,
+  newSetLogPromisesRef,
+  registerNewSetPromise,
 }: {
   date: string;
   workoutId: string;
@@ -46,6 +48,8 @@ export function ExerciseCard({
   onRemove?: () => void;
   onSetDirty?: (id: string) => void;
   onSetFlushed?: (id: string) => void;
+  newSetLogPromisesRef?: MutableRefObject<Map<string, Promise<boolean>>>;
+  registerNewSetPromise?: (id: string, promise: Promise<boolean>) => void;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -78,7 +82,14 @@ export function ExerciseCard({
     };
     onLocalSets([...sets, optimistic]);
 
-    const { id: mid } = await mutate("log_set", {
+    // Mark the freshly-added set as "log_set in flight" so a stepper edit
+    // that lands within the network window doesn't fire update_set before
+    // the row exists on the server (see gym-page-client.tsx comment on
+    // newSetLogPromisesRef). Also mark it dirty right away so an intervening
+    // refetch doesn't roll back the row (dirtySetIdsRef otherwise only gets
+    // an entry on the first stepper tap via persist → onDirty).
+    onSetDirty?.(id);
+    const { done } = await mutate("log_set", {
       id,
       workoutId,
       exerciseId: exercise.id,
@@ -87,7 +98,7 @@ export function ExerciseCard({
       weightKg,
       date,
     });
-    void mid;
+    registerNewSetPromise?.(id, done);
     // PR detection happens server-side; we won't know until the next page refetch.
     // For instant feedback, do a lightweight client-side PR check: did this match/exceed
     // any prior set's weight in the same exercise? — defer to insights fetcher.
@@ -194,6 +205,7 @@ export function ExerciseCard({
                   onDelete={() => deleteSet(s.id)}
                   onDirty={onSetDirty}
                   onFlushed={onSetFlushed}
+                  newSetLogPromisesRef={newSetLogPromisesRef}
                 />
               ))}
             </div>

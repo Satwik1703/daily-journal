@@ -160,19 +160,39 @@ async function registerBackgroundSync(): Promise<void> {
   }
 }
 
+export interface MutateHandle {
+  /** Server-authoritative mutation id in the IDB queue. */
+  id: string;
+  /**
+   * Resolves when the POST to /api/sync has settled. `true` on 2xx,
+   * `false` on any error (network, 4xx, 5xx, session expired). Never
+   * rejects — safe to ignore in fire-and-forget usage.
+   *
+   * Callers that need to serialize dependent mutations (e.g. don't fire
+   * `update_set` until the row's `log_set` has actually committed
+   * server-side) await this before firing the follow-up.
+   */
+  done: Promise<boolean>;
+}
+
 /**
  * Fire-and-forget mutation. Pushes the mutation onto the IDB queue, attempts
  * an immediate POST to /api/sync, and falls back to Background Sync if the
- * network is down. Caller never awaits the network.
+ * network is down. Caller never awaits the network unless they explicitly
+ * use `handle.done` — see the MutateHandle docstring above.
  *
  * Optimistic UI updates are the caller's responsibility — apply them before
  * calling mutate().
  */
-export async function mutate(kind: string, args: unknown): Promise<{ id: string }> {
+export async function mutate(kind: string, args: unknown): Promise<MutateHandle> {
   const id = await enqueue(kind, args);
   broadcast(STATUS_CHANNEL, { type: "enqueued", id, kind });
-  void attemptSend(id, kind, args);
-  return { id };
+  // Wrap so `done` never rejects — otherwise `void mutate(...)` fire-and-
+  // forget callers would produce unhandled rejections when the POST fails.
+  const done = attemptSend(id, kind, args)
+    .then(() => true)
+    .catch(() => false);
+  return { id, done };
 }
 
 async function attemptSend(id: string, kind: string, args: unknown): Promise<void> {
