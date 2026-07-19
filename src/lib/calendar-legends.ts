@@ -50,6 +50,18 @@ export const POMODORO_LEGEND: CalendarLegend = {
   ],
 };
 
+export const FOOD_LEGEND: CalendarLegend = {
+  title: "Food calendar",
+  blurb: "Cells color by how close your day's kcal came to the target from your nutrition profile.",
+  rows: [
+    { status: "crazy", label: "Crazy", meaning: "Within ±10% of daily target" },
+    { status: "great", label: "Great", meaning: "Within ±20% of target" },
+    { status: "good", label: "Good", meaning: "Within ±35% of target (or logged w/o target)" },
+    { status: "avg", label: "Avg", meaning: "Way off target" },
+    { status: "bad", label: "Bad", meaning: "Had a target, no logs" },
+  ],
+};
+
 export const GYM_LEGEND: CalendarLegend = {
   title: "Gym calendar",
   blurb:

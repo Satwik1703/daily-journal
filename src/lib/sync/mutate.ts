@@ -107,6 +107,7 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     kind === "update_food" ||
     kind === "delete_food" ||
     kind === "favorite_food" ||
+    kind === "toggle_food_favorite" ||
     kind === "create_recipe" ||
     kind === "delete_recipe"
   ) {

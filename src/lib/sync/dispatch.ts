@@ -263,6 +263,7 @@ export const DISPATCH: Record<string, AnyAction> = {
   update_food: updateFood,
   delete_food: (args: { id: string }) => deleteFood(args.id),
   favorite_food: favoriteFood,
+  toggle_food_favorite: favoriteFood,
   log_food: logFood,
   update_food_log: updateFoodLog,
   delete_food_log: (args: { id: string }) => deleteFoodLog(args.id),

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
+  foodFavorites,
   foodLogs,
   foods,
   foodRecipeItems,
@@ -22,7 +23,10 @@ import {
 
 // ---------- Foods ----------
 
-function toFood(r: typeof foods.$inferSelect): Food {
+function toFood(
+  r: typeof foods.$inferSelect,
+  isFav: boolean,
+): Food {
   return {
     id: r.id,
     userId: r.userId,
@@ -40,8 +44,16 @@ function toFood(r: typeof foods.$inferSelect): Food {
     sodiumMg: r.sodiumMg,
     source: r.source as Food["source"],
     offBarcode: r.offBarcode,
-    isFavorite: !!r.isFavorite,
+    isFavorite: isFav,
   };
+}
+
+async function getFavoriteIdSet(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ foodId: foodFavorites.foodId })
+    .from(foodFavorites)
+    .where(eq(foodFavorites.userId, userId));
+  return new Set(rows.map((r) => r.foodId));
 }
 
 /**
@@ -66,13 +78,16 @@ export async function searchFoods(
       ),
     );
   }
-  const rows = await db
-    .select()
-    .from(foods)
-    .where(and(...conds.filter(Boolean)))
-    .orderBy(desc(foods.isFavorite), asc(foods.name))
-    .limit(limit);
-  return rows.map(toFood);
+  const [rows, favIds] = await Promise.all([
+    db
+      .select()
+      .from(foods)
+      .where(and(...conds.filter(Boolean)))
+      .orderBy(asc(foods.name))
+      .limit(limit),
+    getFavoriteIdSet(userId),
+  ]);
+  return rows.map((r) => toFood(r, favIds.has(r.id)));
 }
 
 /** Foods the user has logged most recently (with dedup by foodId). */
@@ -96,32 +111,36 @@ export async function getRecentFoods(
     }
   }
   if (ids.length === 0) return [];
-  const foodRows = await db
-    .select()
-    .from(foods)
-    .where(
-      and(
-        inArray(foods.id, ids),
-        or(eq(foods.userId, userId), isNull(foods.userId)),
+  const [foodRows, favIds] = await Promise.all([
+    db
+      .select()
+      .from(foods)
+      .where(
+        and(
+          inArray(foods.id, ids),
+          or(eq(foods.userId, userId), isNull(foods.userId)),
+        ),
       ),
-    );
-  const byId = new Map(foodRows.map((f) => [f.id, toFood(f)]));
+    getFavoriteIdSet(userId),
+  ]);
+  const byId = new Map(foodRows.map((f) => [f.id, toFood(f, favIds.has(f.id))]));
   return ids.map((id) => byId.get(id)).filter((f): f is Food => f != null);
 }
 
 export async function getFavoriteFoods(userId: string): Promise<Food[]> {
   const rows = await db
-    .select()
-    .from(foods)
+    .select({ food: foods })
+    .from(foodFavorites)
+    .innerJoin(foods, eq(foods.id, foodFavorites.foodId))
     .where(
       and(
+        eq(foodFavorites.userId, userId),
         or(eq(foods.userId, userId), isNull(foods.userId)),
-        eq(foods.isFavorite, true),
         isNull(foods.archivedAt),
       ),
     )
     .orderBy(asc(foods.name));
-  return rows.map(toFood);
+  return rows.map((r) => toFood(r.food, true));
 }
 
 export async function getFoodById(
@@ -138,7 +157,48 @@ export async function getFoodById(
       ),
     )
     .limit(1);
-  return rows[0] ? toFood(rows[0]) : null;
+  if (!rows[0]) return null;
+  const favIds = await getFavoriteIdSet(userId);
+  return toFood(rows[0], favIds.has(rows[0].id));
+}
+
+/** New: month-status map for the food date-stepper calendar popover.
+ *  Status derived from kcal-vs-daily-target using the shared JournalStatus
+ *  palette so the popover matches journal/habits/goals visually.
+ *
+ *  crazy  → within  ±10% of target
+ *  great  → within  ±20% of target
+ *  good   → within  ±35% of target
+ *  avg    → any logs but way off
+ *  bad    → had a target-set profile but zero logs (only for past days)
+ *  empty  → no logs and target ineligible (no profile or future day)
+ */
+export type FoodDayStatus = "crazy" | "great" | "good" | "avg" | "bad" | "empty";
+export async function getFoodMonthStatus(
+  userId: string,
+  start: string,
+  end: string,
+): Promise<Record<string, FoodDayStatus>> {
+  const [daily, profile] = await Promise.all([
+    getFoodDailyTotals(userId, start, end),
+    getNutritionProfile(userId),
+  ]);
+  const target = profile.dailyKcalTarget ?? 0;
+  const byDate: Record<string, FoodDayStatus> = {};
+  for (const d of daily) {
+    if (d.kcal <= 0) continue;
+    if (target <= 0) {
+      byDate[d.date] = "good";
+      continue;
+    }
+    const ratio = d.kcal / target;
+    const off = Math.abs(ratio - 1);
+    if (off <= 0.1) byDate[d.date] = "crazy";
+    else if (off <= 0.2) byDate[d.date] = "great";
+    else if (off <= 0.35) byDate[d.date] = "good";
+    else byDate[d.date] = "avg";
+  }
+  return byDate;
 }
 
 // ---------- Food logs ----------

@@ -893,3 +893,22 @@ export const foodRecipeItems = sqliteTable(
   },
   (t) => [index("food_recipe_items_recipe").on(t.recipeId)],
 );
+
+// Per-user food favorites (Phase 16 follow-up). Global seed rows can be
+// favorited without a per-user flag on the food row itself.
+export const foodFavorites = sqliteTable(
+  "food_favorites",
+  {
+    userId: text("user_id").notNull(),
+    foodId: text("food_id")
+      .notNull()
+      .references((): AnySQLiteColumn => foods.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.foodId] }),
+    index("food_favorites_food").on(t.foodId),
+  ],
+);

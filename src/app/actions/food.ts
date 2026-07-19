@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db/client";
 import {
+  foodFavorites,
   foodLogs,
   foods,
   foodRecipeItems,
@@ -133,19 +134,35 @@ export async function deleteFood(id: string): Promise<void> {
   revalidatePath("/food", "layout");
 }
 
+/**
+ * Per-user favorite. Works on both user-owned foods AND global seed rows
+ * via the food_favorites join table (Phase 16 follow-up).
+ */
 export async function favoriteFood(input: {
   id: string;
   isFavorite: boolean;
 }): Promise<void> {
   const { user } = await requireUser();
   if (!input.id) throw new Error("id required");
-  // Toggling favorite works on both user-owned foods and global seeds — for
-  // seeds we'd need a per-user favorite table; for MVP the star is stored
-  // globally on custom foods only, silently no-op on seeds.
-  await db
-    .update(foods)
-    .set({ isFavorite: !!input.isFavorite })
-    .where(and(eq(foods.id, input.id), eq(foods.userId, user.id)));
+  if (input.isFavorite) {
+    // Idempotent — ignore duplicate PK collisions.
+    try {
+      await db
+        .insert(foodFavorites)
+        .values({ userId: user.id, foodId: input.id });
+    } catch {
+      /* already favorited */
+    }
+  } else {
+    await db
+      .delete(foodFavorites)
+      .where(
+        and(
+          eq(foodFavorites.userId, user.id),
+          eq(foodFavorites.foodId, input.id),
+        ),
+      );
+  }
   revalidatePath("/food", "layout");
 }
 

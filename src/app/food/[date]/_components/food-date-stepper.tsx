@@ -1,51 +1,60 @@
 "use client";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { addDays, formatHumanDate, todayLocal } from "@/lib/dates";
+import { cn } from "@/lib/utils";
+import { DatePickerPopover } from "@/components/date-picker-popover";
+import { FOOD_LEGEND } from "@/lib/calendar-legends";
+import { fetchFoodMonthStatus } from "@/app/actions/food-month";
 
 export function FoodDateStepper({ date }: { date: string }) {
   const router = useRouter();
-  const today = todayLocal();
   const prev = addDays(date, -1);
   const next = addDays(date, 1);
+  const today = todayLocal();
   const isToday = date === today;
-  const canGoForward = next <= today;
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border bg-card/30 px-2 py-1">
+    <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-4 py-3 backdrop-blur">
       <Link
         href={`/food/${prev}`}
-        className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label="Previous day"
+        className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
-        <ChevronLeft className="size-4" />
+        <ChevronLeft className="size-5" />
       </Link>
-      <button
-        type="button"
-        className="flex flex-col items-center px-3"
-        onClick={() => router.push(`/food/${today}`)}
+
+      <DatePickerPopover
+        selected={date}
+        onSelect={(d) => router.push(`/food/${d}`)}
+        fetchMonthStatus={fetchFoodMonthStatus}
+        legend={FOOD_LEGEND}
       >
-        <span className="text-sm font-medium tabular-nums">
-          {formatHumanDate(date)}
+        <span className="flex flex-col items-center gap-0.5 px-2 py-1 transition-colors hover:bg-muted/60 rounded-md">
+          <span className="inline-flex items-center gap-1 text-base font-medium leading-tight">
+            {formatHumanDate(date)}
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          </span>
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            {isToday ? "Today" : "Tap to jump"}
+          </span>
         </span>
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {isToday ? "Today" : "Tap for today"}
-        </span>
-      </button>
+      </DatePickerPopover>
+
       <Link
-        href={canGoForward ? `/food/${next}` : `/food/${date}`}
-        className={
-          "rounded p-1.5 text-muted-foreground " +
-          (canGoForward
-            ? "hover:bg-muted hover:text-foreground"
-            : "pointer-events-none opacity-30")
-        }
+        href={`/food/${next}`}
         aria-label="Next day"
-        aria-disabled={!canGoForward}
+        className={cn(
+          "rounded-md p-2 transition-colors",
+          date >= today
+            ? "pointer-events-none text-muted-foreground/40"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
+        aria-disabled={date >= today}
       >
-        <ChevronRight className="size-4" />
+        <ChevronRight className="size-5" />
       </Link>
     </div>
   );

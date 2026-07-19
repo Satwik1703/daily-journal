@@ -6,6 +6,7 @@ import {
   getFoodLogsForDate,
   getNutritionProfile,
   getRecentFoods,
+  getRecipesForUser,
   getWaterLogsForDate,
 } from "@/db/queries/food";
 
@@ -23,12 +24,13 @@ export async function GET(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const userId = session.user.id;
 
-  const [foodLogs, waterLogs, profile, recentFoods, favoriteFoods] = await Promise.all([
+  const [foodLogs, waterLogs, profile, recentFoods, favoriteFoods, recipes] = await Promise.all([
     getFoodLogsForDate(userId, date),
     getWaterLogsForDate(userId, date),
     getNutritionProfile(userId),
     getRecentFoods(userId, 12),
     getFavoriteFoods(userId),
+    getRecipesForUser(userId),
   ]);
 
   return NextResponse.json({
@@ -38,5 +40,15 @@ export async function GET(
     profile,
     recentFoods,
     favoriteFoods,
+    recipes: recipes.map((r) => ({
+      id: r.id,
+      name: r.name,
+      emoji: r.emoji,
+      servings: r.servings,
+      totalKcal: r.totalKcal,
+      totalProteinG: r.totalProteinG,
+      totalCarbsG: r.totalCarbsG,
+      totalFatG: r.totalFatG,
+    })),
   });
 }

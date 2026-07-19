@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Search, Loader2, Star, X, Plus } from "lucide-react";
+import { Search, Loader2, Star, X, Plus, ChefHat } from "lucide-react";
 import { customAlphabet } from "nanoid";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -12,20 +12,61 @@ import { useCachedPage } from "@/lib/sync/cache";
 import type { Food, FoodLog } from "@/lib/food-meta";
 import { scaleNutrition } from "@/lib/food-meta";
 import { CustomFoodDialog } from "./custom-food-dialog";
+import { RecipeBuilderDialog } from "./recipe-builder-dialog";
 
 const uid = customAlphabet(
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
   12,
 );
 
-type Tab = "search" | "recent" | "favorites" | "custom";
+type Tab = "search" | "recent" | "favorites" | "mine";
+
+type Recipe = {
+  id: string;
+  name: string;
+  emoji: string | null;
+  servings: number;
+  totalKcal: number;
+  totalProteinG: number;
+  totalCarbsG: number;
+  totalFatG: number;
+};
 
 type PageData = {
   date: string;
   foodLogs: FoodLog[];
   recentFoods: Food[];
   favoriteFoods: Food[];
+  recipes: Recipe[];
 };
+
+/**
+ * Turn a recipe into a Food-shaped row so we can reuse FoodRow and
+ * QuantityDialog for it. Nutrition is per-serving; picking quantity=2 logs
+ * two servings worth.
+ */
+function recipeToFood(r: Recipe): Food {
+  const servings = Math.max(1, r.servings);
+  return {
+    id: `recipe-${r.id}`,
+    userId: "self",
+    name: `${r.emoji ? r.emoji + " " : ""}${r.name}`,
+    brand: "Recipe",
+    category: null,
+    servingUnit: "serving",
+    servingSize: 1,
+    kcal: r.totalKcal / servings,
+    proteinG: r.totalProteinG / servings,
+    carbsG: r.totalCarbsG / servings,
+    fatG: r.totalFatG / servings,
+    fiberG: null,
+    sugarG: null,
+    sodiumMg: null,
+    source: "custom",
+    offBarcode: null,
+    isFavorite: false,
+  };
+}
 
 export function FoodPickerSheet({
   date,
@@ -45,9 +86,8 @@ export function FoodPickerSheet({
   const [searching, setSearching] = useState(false);
   const [picked, setPicked] = useState<Food | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
+  const [recipeBuilderOpen, setRecipeBuilderOpen] = useState(false);
 
-  // Read the current day payload (already fetched by the parent page).
-  // If we hit this without a cached parent, still works via /api/page/food/[date].
   const data = useCachedPage<PageData | null>(
     `food:${date}`,
     null,
@@ -58,13 +98,11 @@ export function FoodPickerSheet({
     },
   );
 
-  // Debounce the search field.
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
 
-  // Hit the search endpoint whenever the debounced query settles + we're on the Search tab.
   useEffect(() => {
     if (!open) return;
     if (tab !== "search") return;
@@ -98,7 +136,6 @@ export function FoodPickerSheet({
     };
   }, [open, debouncedQ, tab]);
 
-  // Reset per-open.
   useEffect(() => {
     if (open) {
       setTab("recent");
@@ -108,6 +145,29 @@ export function FoodPickerSheet({
       setPicked(null);
     }
   }, [open]);
+
+  // Local favorite override so the star responds instantly before the
+  // page cache refreshes.
+  const [favOverride, setFavOverride] = useState<Map<string, boolean>>(new Map());
+  const applyFav = (f: Food): Food =>
+    favOverride.has(f.id) ? { ...f, isFavorite: favOverride.get(f.id)! } : f;
+
+  function toggleFavorite(f: Food) {
+    if (f.source === "off") {
+      // Not yet persisted — favoriting doesn't make sense. Silently ignore.
+      return;
+    }
+    const next = !f.isFavorite;
+    setFavOverride((m) => {
+      const nn = new Map(m);
+      nn.set(f.id, next);
+      return nn;
+    });
+    void mutate("toggle_food_favorite", { id: f.id, isFavorite: next });
+  }
+
+  const recipes = data?.recipes ?? [];
+  const customFoods = (data?.recentFoods ?? []).filter((f) => f.source === "custom");
 
   return (
     <>
@@ -120,9 +180,8 @@ export function FoodPickerSheet({
           </DialogHeader>
 
           <div className="space-y-3">
-            {/* Tabs */}
             <div className="flex gap-1 border-b border-border">
-              {(["recent", "favorites", "search", "custom"] as Tab[]).map((t) => (
+              {(["recent", "favorites", "search", "mine"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -134,7 +193,7 @@ export function FoodPickerSheet({
                       : "border-transparent text-muted-foreground hover:text-foreground")
                   }
                 >
-                  {t === "favorites" ? "Fav" : t}
+                  {t === "favorites" ? "Fav" : t === "mine" ? "Mine" : t}
                 </button>
               ))}
             </div>
@@ -144,7 +203,7 @@ export function FoodPickerSheet({
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <Input
                   autoFocus
-                  placeholder="Search foods (uses Open Food Facts for anything not in the seed)"
+                  placeholder="Search foods (Open Food Facts for anything not in seed)"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   className="pl-7"
@@ -158,15 +217,17 @@ export function FoodPickerSheet({
             <div className="max-h-[50vh] overflow-y-auto -mx-6 px-6">
               {tab === "recent" ? (
                 <FoodList
-                  foods={data?.recentFoods ?? []}
+                  foods={(data?.recentFoods ?? []).map(applyFav)}
                   emptyHint="No recent foods yet. Log something and it'll appear here."
                   onPick={setPicked}
+                  onToggleFav={toggleFavorite}
                 />
               ) : tab === "favorites" ? (
                 <FoodList
-                  foods={data?.favoriteFoods ?? []}
-                  emptyHint="No favorites yet. Star a custom food to add it."
+                  foods={(data?.favoriteFoods ?? []).map(applyFav)}
+                  emptyHint="No favorites yet. Tap the star on any food."
                   onPick={setPicked}
+                  onToggleFav={toggleFavorite}
                 />
               ) : tab === "search" ? (
                 debouncedQ.length === 0 ? (
@@ -176,20 +237,73 @@ export function FoodPickerSheet({
                 ) : remoteResults == null ? (
                   <p className="py-6 text-center text-xs text-muted-foreground">Searching…</p>
                 ) : (
-                  <SearchResults results={remoteResults} onPick={setPicked} />
+                  <SearchResults
+                    results={{
+                      local: remoteResults.local.map(applyFav),
+                      off: remoteResults.off,
+                    }}
+                    onPick={setPicked}
+                    onToggleFav={toggleFavorite}
+                  />
                 )
               ) : (
-                <div className="py-4 text-center text-xs text-muted-foreground">
-                  <p>Create a food that isn&apos;t in the database.</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCustomOpen(true)}
-                    className="mt-3"
-                  >
-                    <Plus className="mr-1 size-3.5" /> New custom food
-                  </Button>
+                <div className="space-y-3">
+                  {recipes.length > 0 ? (
+                    <div>
+                      <p className="mb-1 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Your recipes
+                      </p>
+                      <ul className="divide-y divide-border/40">
+                        {recipes.map((r) => (
+                          <RecipeRow
+                            key={r.id}
+                            recipe={r}
+                            onPick={() => setPicked(recipeToFood(r))}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {customFoods.length > 0 ? (
+                    <div>
+                      <p className="mb-1 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Your custom foods
+                      </p>
+                      <ul className="divide-y divide-border/40">
+                        {customFoods.map((f) => (
+                          <FoodRow
+                            key={f.id}
+                            food={applyFav(f)}
+                            onPick={() => setPicked(f)}
+                            onToggleFav={() => toggleFavorite(f)}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {recipes.length === 0 && customFoods.length === 0 ? (
+                    <p className="text-center text-xs text-muted-foreground">
+                      No custom foods or recipes yet.
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2 pt-2 justify-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCustomOpen(true)}
+                    >
+                      <Plus className="mr-1 size-3.5" /> New custom food
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRecipeBuilderOpen(true)}
+                    >
+                      <ChefHat className="mr-1 size-3.5" /> New recipe
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -218,6 +332,11 @@ export function FoodPickerSheet({
           setPicked(food);
         }}
       />
+
+      <RecipeBuilderDialog
+        open={recipeBuilderOpen}
+        onOpenChange={setRecipeBuilderOpen}
+      />
     </>
   );
 }
@@ -226,10 +345,12 @@ function FoodList({
   foods,
   emptyHint,
   onPick,
+  onToggleFav,
 }: {
   foods: Food[];
   emptyHint: string;
   onPick: (f: Food) => void;
+  onToggleFav: (f: Food) => void;
 }) {
   if (foods.length === 0) {
     return <p className="py-6 text-center text-xs text-muted-foreground">{emptyHint}</p>;
@@ -237,7 +358,12 @@ function FoodList({
   return (
     <ul className="divide-y divide-border/40">
       {foods.map((f) => (
-        <FoodRow key={f.id} food={f} onPick={() => onPick(f)} />
+        <FoodRow
+          key={f.id}
+          food={f}
+          onPick={() => onPick(f)}
+          onToggleFav={() => onToggleFav(f)}
+        />
       ))}
     </ul>
   );
@@ -246,9 +372,11 @@ function FoodList({
 function SearchResults({
   results,
   onPick,
+  onToggleFav,
 }: {
   results: { local: Food[]; off: Food[] };
   onPick: (f: Food) => void;
+  onToggleFav: (f: Food) => void;
 }) {
   const nothing = results.local.length === 0 && results.off.length === 0;
   return (
@@ -260,7 +388,12 @@ function SearchResults({
           </p>
           <ul className="divide-y divide-border/40 mb-3">
             {results.local.map((f) => (
-              <FoodRow key={f.id} food={f} onPick={() => onPick(f)} />
+              <FoodRow
+                key={f.id}
+                food={f}
+                onPick={() => onPick(f)}
+                onToggleFav={() => onToggleFav(f)}
+              />
             ))}
           </ul>
         </>
@@ -272,7 +405,12 @@ function SearchResults({
           </p>
           <ul className="divide-y divide-border/40">
             {results.off.map((f) => (
-              <FoodRow key={f.id} food={f} onPick={() => onPick(f)} />
+              <FoodRow
+                key={f.id}
+                food={f}
+                onPick={() => onPick(f)}
+                onToggleFav={() => onToggleFav(f)}
+              />
             ))}
           </ul>
         </>
@@ -286,13 +424,21 @@ function SearchResults({
   );
 }
 
-function FoodRow({ food, onPick }: { food: Food; onPick: () => void }) {
+function FoodRow({
+  food,
+  onPick,
+  onToggleFav,
+}: {
+  food: Food;
+  onPick: () => void;
+  onToggleFav?: () => void;
+}) {
   return (
-    <li>
+    <li className="flex items-start gap-1">
       <button
         type="button"
         onClick={onPick}
-        className="flex w-full items-start gap-2 py-2 text-left transition-colors hover:bg-muted/40"
+        className="flex flex-1 items-start gap-2 py-2 text-left transition-colors hover:bg-muted/40"
       >
         <div className="mt-0.5 shrink-0">
           {food.source === "custom" ? (
@@ -321,9 +467,64 @@ function FoodRow({ food, onPick }: { food: Food; onPick: () => void }) {
             <span className="text-muted-foreground/80"> per {food.servingSize}{food.servingUnit === "g" || food.servingUnit === "ml" ? food.servingUnit : ` ${food.servingUnit}`}</span>
           </p>
         </div>
-        {food.isFavorite ? (
-          <Star className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
-        ) : null}
+      </button>
+      {onToggleFav && food.source !== "off" ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFav();
+          }}
+          aria-label={food.isFavorite ? "Unfavorite" : "Favorite"}
+          className="mt-2 p-1 shrink-0 rounded hover:bg-muted/50"
+        >
+          <Star
+            className={
+              "size-3.5 transition-colors " +
+              (food.isFavorite ? "fill-amber-400 text-amber-500" : "text-muted-foreground/50")
+            }
+          />
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
+function RecipeRow({
+  recipe,
+  onPick,
+}: {
+  recipe: Recipe;
+  onPick: () => void;
+}) {
+  const perServing = {
+    kcal: Math.round(recipe.totalKcal / Math.max(1, recipe.servings)),
+    p: Math.round((recipe.totalProteinG / Math.max(1, recipe.servings)) * 10) / 10,
+    c: Math.round((recipe.totalCarbsG / Math.max(1, recipe.servings)) * 10) / 10,
+    f: Math.round((recipe.totalFatG / Math.max(1, recipe.servings)) * 10) / 10,
+  };
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onPick}
+        className="flex w-full items-start gap-2 py-2 text-left transition-colors hover:bg-muted/40"
+      >
+        <div className="mt-0.5 shrink-0">
+          <span className="rounded bg-emerald-500/20 px-1 py-0 text-[9px] uppercase text-emerald-700 dark:text-emerald-300">
+            Recipe
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">
+            {recipe.emoji ? `${recipe.emoji} ` : ""}
+            {recipe.name}
+          </p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            {perServing.kcal} kcal · P {perServing.p}g · C {perServing.c}g · F {perServing.f}g
+            <span className="text-muted-foreground/80"> per serving</span>
+          </p>
+        </div>
       </button>
     </li>
   );
@@ -353,8 +554,6 @@ function QuantityDialog({
 
   function submit() {
     const id = uid();
-    // For OFF results, save into the user's custom foods first so future logs
-    // reference a stable row.
     if (food.source === "off") {
       const foodDbId = uid();
       void mutate("create_food", {
@@ -383,11 +582,14 @@ function QuantityDialog({
         fatG: scaled.fatG,
       });
     } else {
+      // Recipes have id like `recipe-<id>` — don't use as foodId (they're
+      // not in the foods table).
+      const isRecipe = food.id.startsWith("recipe-");
       void mutate("log_food", {
         id,
         date,
         mealType,
-        foodId: food.id,
+        foodId: isRecipe ? null : food.id,
         foodName: food.name,
         quantity: q,
         kcal: scaled.kcal,
