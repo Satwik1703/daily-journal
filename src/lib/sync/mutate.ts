@@ -2,6 +2,7 @@
 
 import { enqueue, markDone, markFailed, markInFlight } from "./queue";
 import { invalidateCache } from "./cache";
+import { authAwareFetch } from "./auth-fetch";
 
 const STATUS_CHANNEL = "sync-status";
 const CONFLICT_CHANNEL = "sync-conflict";
@@ -177,7 +178,7 @@ export async function mutate(kind: string, args: unknown): Promise<{ id: string 
 async function attemptSend(id: string, kind: string, args: unknown): Promise<void> {
   try {
     await markInFlight(id);
-    const res = await fetch("/api/sync", {
+    const res = await authAwareFetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, args }),
@@ -215,7 +216,7 @@ export async function flushQueue(): Promise<{ ok: number; failed: number }> {
   for (const row of rows) {
     try {
       await markInFlight(row.id);
-      const res = await fetch("/api/sync", {
+      const res = await authAwareFetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: row.kind, args: row.args }),
@@ -245,7 +246,7 @@ export async function retryOne(id: string): Promise<boolean> {
   if (!row) return false;
   try {
     await markInFlight(row.id);
-    const res = await fetch("/api/sync", {
+    const res = await authAwareFetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: row.kind, args: row.args }),

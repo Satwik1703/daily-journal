@@ -1,6 +1,7 @@
 "use client";
 
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { JournalForm } from "./journal-form";
 import { TasksBlock } from "./tasks-block";
 import { DateStepper } from "./date-stepper";
@@ -34,7 +35,7 @@ export function JournalPageClient({ date }: { date: string }) {
     `journal:${date}`,
     null,
     async () => {
-      const res = await fetch(`/api/page/journal/${date}`, { cache: "no-store" });
+      const res = await authAwareFetch(`/api/page/journal/${date}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Fetch failed");
       return (await res.json()) as PageData;
     },

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, Trophy } from "lucide-react";
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { todayLocal } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import {
@@ -89,7 +90,7 @@ export function GymInsightsPageClient() {
     `gym-insights:v2:${range}`,
     null,
     async () => {
-      const res = await fetch(`/api/page/gym/insights/${range}`, { cache: "no-store" });
+      const res = await authAwareFetch(`/api/page/gym/insights/${range}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Fetch failed");
       return (await res.json()) as InsightsData;
     },

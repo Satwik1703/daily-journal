@@ -26,6 +26,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { mutate } from "@/lib/sync/mutate";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { nanoid } from "nanoid";
 import { formatShortDate, type DateString } from "@/lib/dates";
 import {
@@ -91,7 +92,7 @@ export function TaskDetailSheet({
     setSubtasks([]);
     // Fetch subtasks lazily.
     let cancelled = false;
-    fetch(`/api/page/todo-detail/${todo.id}`, { cache: "no-store" })
+    authAwareFetch(`/api/page/todo-detail/${todo.id}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { subtasks: [] }))
       .then((d) => {
         if (!cancelled) setSubtasks(d.subtasks ?? []);

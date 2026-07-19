@@ -12,7 +12,14 @@ const PUBLIC_PATH_PREFIXES = [
   "/favicon",
 ];
 
-const PUBLIC_EXACT = new Set(["/auth", "/manifest.webmanifest", "/sw.js"]);
+const PUBLIC_EXACT = new Set([
+  "/auth",
+  "/manifest.webmanifest",
+  "/sw.js",
+  // Public escape hatch — clears all client-side state when the app is
+  // stuck showing stale data. See src/app/reset/page.tsx.
+  "/reset",
+]);
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true;

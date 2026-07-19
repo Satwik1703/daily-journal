@@ -6,6 +6,7 @@ import { Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { mutate } from "@/lib/sync/mutate";
 import { formatHumanDate } from "@/lib/dates";
 import {
@@ -64,7 +65,7 @@ export function GymPageClient({ date }: { date: string }) {
     `gym:v2:${date}`,
     null,
     async () => {
-      const res = await fetch(`/api/page/gym/${date}`, { cache: "no-store" });
+      const res = await authAwareFetch(`/api/page/gym/${date}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Fetch failed");
       return (await res.json()) as PageData;
     },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { flushQueue } from "@/lib/sync/mutate";
 import { postFlushToSW } from "@/lib/sync/sw-support";
@@ -12,9 +13,20 @@ const FLUSH_INTERVAL_MS = 30_000;
  * focus, visibility change, and every 30s. Also nudges the service worker
  * to attempt its own drain (handles the case where the SW is alive but the
  * client tab woke up first).
+ *
+ * No-op on public routes (/auth/*, /reset) — nothing meaningful to sync
+ * without a session, and racing against /reset's IDB wipe would leak an
+ * open connection that blocks the delete.
  */
 export function SyncBootstrap() {
+  const pathname = usePathname();
+  const skip =
+    pathname === "/reset" ||
+    pathname === "/auth/login" ||
+    pathname?.startsWith("/auth/") === true;
+
   useEffect(() => {
+    if (skip) return;
     let cancelled = false;
 
     function safeFlush() {
@@ -44,8 +56,14 @@ export function SyncBootstrap() {
       conflictChannel.onmessage = (e) => {
         const data = e.data as { kind?: string; error?: string };
         if (!data) return;
+        // Skip the toast on session-expiration failures — the page is
+        // hard-navigating to /auth/login via authAwareFetch, and a
+        // "Sync failed: Unauthorized" toast on the login screen is
+        // just confusing noise.
+        const err = data.error ?? "";
+        if (/unauthori[sz]ed/i.test(err) || err.startsWith("HTTP 401")) return;
         toast.error(
-          `Sync failed: ${data.error ?? "unknown"}`,
+          `Sync failed: ${err || "unknown"}`,
           { description: "Check Settings → Sync status to retry or discard." },
         );
       };
@@ -61,7 +79,7 @@ export function SyncBootstrap() {
       window.clearInterval(interval);
       conflictChannel?.close();
     };
-  }, []);
+  }, [skip]);
 
   return null;
 }

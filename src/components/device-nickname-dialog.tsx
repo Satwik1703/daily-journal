@@ -51,6 +51,7 @@ export function DeviceNicknameDialog() {
   useEffect(() => {
     if (checked) return;
     if (pathname.startsWith("/auth")) return;
+    if (pathname === "/reset") return;
     let cancelled = false;
     void (async () => {
       try {

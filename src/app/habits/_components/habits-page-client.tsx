@@ -1,6 +1,7 @@
 "use client";
 
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { formatHumanDate } from "@/lib/dates";
 import { TodayToggles } from "./today-toggles";
 import { HabitGrid } from "./habit-grid";
@@ -40,7 +41,7 @@ export function HabitsPageClient({ date }: { date: string }) {
     `habits:${date}`,
     null,
     async () => {
-      const res = await fetch(`/api/page/habits/${date}`, { cache: "no-store" });
+      const res = await authAwareFetch(`/api/page/habits/${date}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Fetch failed");
       return (await res.json()) as PageData;
     },

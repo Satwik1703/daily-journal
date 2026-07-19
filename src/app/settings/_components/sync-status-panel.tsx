@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { listPending, clearAll, discardMutation } from "@/lib/sync/queue";
 import { flushQueue, retryOne } from "@/lib/sync/mutate";
+import { resetLocalState } from "@/lib/sync/reset-local";
 import type { PendingMutation } from "@/lib/sync/db";
 
 const POLL_MS = 2000;
@@ -62,6 +63,7 @@ export function SyncStatusPanel() {
   const [, setNow] = useState(0);
   const [pending, startTransition] = useTransition();
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [lastSync, setLastSync] = useState<number | null>(null);
 
   useEffect(() => {
@@ -225,7 +227,53 @@ export function SyncStatusPanel() {
             ) : null}
           </div>
         </div>
+
+        <div className="mt-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Stuck showing stale data?</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Reset local state — clears the offline cache, service worker, and stored
+                preferences, then returns you to login. You can also type <code>/reset</code>
+                in the address bar anytime the app is frozen.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmReset(true)}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
       </CardContent>
+
+      <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif text-base">Reset local state?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This wipes every scrap of client-side state — the offline cache (IndexedDB), service
+            worker, and stored preferences — then reloads to the login screen. No server data is
+            touched. Any pending mutations still queued will be lost.
+          </p>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="ghost" />}>Cancel</DialogClose>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                await resetLocalState();
+                window.location.replace("/auth/login");
+              }}
+            >
+              Reset and log out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
         <DialogContent>

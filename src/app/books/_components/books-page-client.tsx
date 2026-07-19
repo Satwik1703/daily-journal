@@ -15,6 +15,7 @@ import {
 import { MoreHorizontal, Pencil, Trash2, BookCheck, BookMinus, BookHeart } from "lucide-react";
 import { mutate } from "@/lib/sync/mutate";
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { cn } from "@/lib/utils";
 import { BookFormDialog } from "./book-form-dialog";
 import type { Book, BookStatus } from "@/db/queries/books";
@@ -34,7 +35,7 @@ const STATUS_SECTIONS: { key: BookStatus; label: string; emptyHint?: string }[] 
 
 export function BooksPageClient() {
   const data = useCachedPage<PageData | null>(`books`, null, async () => {
-    const res = await fetch(`/api/page/books`, { cache: "no-store" });
+    const res = await authAwareFetch(`/api/page/books`, { cache: "no-store" });
     if (!res.ok) throw new Error("Fetch failed");
     return (await res.json()) as PageData;
   });

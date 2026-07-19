@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { Button } from "@/components/ui/button";
 import { mutate } from "@/lib/sync/mutate";
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import { parseQuickAdd } from "@/lib/todo/quick-parse";
 import { addDays, todayLocal, type DateString } from "@/lib/dates";
 import {
@@ -41,7 +42,7 @@ const EMPTY_COUNTS = { today: 0, tomorrow: 0, next7: 0, inbox: 0, all: 0, byList
 export function TodoClient({ view }: { view: string }) {
   // `v2` namespace bump flushes any stale-shaped cache from earlier builds.
   const data = useCachedPage<TodoPageData | null>(`todo:v2:${view}`, null, async () => {
-    const res = await fetch(`/api/page/todo/${view}`, { cache: "no-store" });
+    const res = await authAwareFetch(`/api/page/todo/${view}`, { cache: "no-store" });
     if (!res.ok) throw new Error("Fetch failed");
     return (await res.json()) as TodoPageData;
   });

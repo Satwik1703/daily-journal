@@ -1,6 +1,7 @@
 "use client";
 
 import { useCachedPage } from "@/lib/sync/cache";
+import { authAwareFetch } from "@/lib/sync/auth-fetch";
 import {
   formatPeriodRange,
   periodKeyFor,
@@ -47,7 +48,7 @@ export function GoalsPageClient({ period, anchor }: { period: GoalPeriod; anchor
     `goals:${period}:${anchor}`,
     null,
     async () => {
-      const res = await fetch(`/api/page/goals/${period}/${anchor}`, {
+      const res = await authAwareFetch(`/api/page/goals/${period}/${anchor}`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error("Fetch failed");
