@@ -40,6 +40,9 @@ yarn-error.log*
 .vscode/
 .idea/
 
+# claude code — personal per-machine settings (project settings + commands stay tracked)
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

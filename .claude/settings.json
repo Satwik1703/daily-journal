@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "additionalDirectories": [
+      "C:\\Users\\Admin\\.claude",
+      "D:\\sathw\\Experiments"
+    ]
+  }
+}
