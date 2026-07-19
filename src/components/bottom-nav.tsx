@@ -308,10 +308,27 @@ function NavCell({
         style={{ WebkitTouchCallout: "none" }}
       >
         <div ref={iconWrapRef} className="relative">
+          {/* Alt-variant underlay — the icon we'd swap to on long-press,
+              rendered behind the primary at a small offset + reduced
+              opacity, so users can see the "other side" of the cycling
+              slot without any mystery dot. Brightens on hold. */}
+          {altVariant ? (
+            <altVariant.Icon
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute size-4 transition-all",
+                pressing
+                  ? "opacity-70 translate-x-[3px] translate-y-[3px]"
+                  : "opacity-30 translate-x-[2px] translate-y-[2px]",
+                active ? "text-primary" : "text-muted-foreground",
+              )}
+              style={{ left: "2px", top: "2px" }}
+            />
+          ) : null}
           <Icon
             key={variant.href}
             className={cn(
-              "size-5 transition-transform",
+              "relative size-5 transition-transform",
               "animate-in fade-in zoom-in-95 duration-150",
               active && "stroke-[2.5]",
               pressing && "scale-110",
@@ -324,19 +341,6 @@ function NavCell({
             >
               {pendingCount > 9 ? "9+" : pendingCount}
             </span>
-          ) : null}
-          {/* Long-press affordance dot */}
-          {hasCycle ? (
-            <span
-              aria-hidden
-              className={cn(
-                "absolute -right-1.5 -bottom-1 size-1.5 rounded-full transition-opacity",
-                active
-                  ? "bg-primary/50 opacity-100"
-                  : "bg-muted-foreground/40 opacity-70",
-                pressing && "bg-primary opacity-100 animate-pulse",
-              )}
-            />
           ) : null}
           {/* Small hold ring — grows locally around the icon during the 500ms wait. */}
           {pressing && hasCycle ? (
