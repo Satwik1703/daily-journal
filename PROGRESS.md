@@ -1871,6 +1871,78 @@ Dot was a mystery affordance. Replaced with a ghost of the slot's OTHER variant 
 
 ---
 
+## 🚧 Phase 16 — Calorie Tracker tab (LOCAL ONLY, awaiting user test)
+
+HealthifyMe-lite clone, no AI features. Full 5-Part scope shipped in a single session on 2026-07-19. Committed locally as `2b1c…` (single commit) — **not pushed, not deployed**. User verifies locally, then we push + migrate prod + `vercel --prod`.
+
+Plan: `C:\Users\Admin\.claude\plans\let-s-build-calorie-tracker-tab.md`.
+
+### Answered before build
+
+1. Nav slot → Pomodoro long-press variant (Pomodoro ↔ Food, uses Phase 15.4 cycling infra).
+2. Food database → 65-row seed (user's 3-week menu + core ingredients) w/ `user_id NULL` (global). Anything not in seed → **Open Food Facts** via a `/api/food-search` server proxy. Picked OFF results auto-save as `source='off'` custom foods for offline reuse.
+3. Barcode scanning — deferred (explicit).
+4. Body measurements — dropped (explicit).
+5. Meal categories — configurable per-user via `nutrition_profile.meal_categories_json`, default `[Breakfast, Lunch, Snacks, Dinner]`.
+6. kcal only.
+7. Build all 5 Parts locally, deploy at end.
+8. Notifications/reminders — dropped (explicit).
+
+### Schema — migration `0021_food_tracker.sql`
+
+`foods`, `food_logs`, `water_logs`, `nutrition_profile`, `food_recipes`, `food_recipe_items`. All per-user (data wall from Phase 12). `foods.user_id NULL` = global seed. `food_logs.food_name` denormalized so a food deletion never wipes the log. Applied to local `local.db` only.
+
+### Parts
+
+- **Part A · Core food logging.** Routes `/food`, `/food/[date]` client shell, `/api/page/food/[date]` SWR endpoint. Components: date stepper, daily summary donut + macro bars, per-meal cards w/ inline delete, food picker sheet (Recent / Fav / Search / Custom tabs). `/api/food-search` proxies Open Food Facts w/ 5s timeout, per-serving nutrition preference w/ per-100g fallback. QuantityDialog scales macros live.
+- **Part B · Nutrition profile.** Mifflin-St Jeor BMR + activity-multiplier TDEE + goal-driven daily kcal target + 30/40/30 macro split. Auto-pulls current weight from `body_weight_logs`. Settings → Nutrition profile card + Meal categories editor. Water target lives on the same profile.
+- **Part C · Water tracker.** Preset chips (glass 250 / bottle 500 / big 750) + custom-ml input, inline delete, progress bar vs target. Offline-safe via existing `mutate()` queue.
+- **Part D · Custom foods.** CustomFoodDialog + full CRUD via `create_food`/`update_food`/`delete_food`. OFF results auto-persist as custom foods on first log. **Recipe builder UI deferred** (backend + schema + actions done — user creates recipes by making custom foods manually for now).
+- **Part E · Nutrition insights.** `NutritionSection` on `/insights` — avg kcal/day, target, days-at-or-under-budget streak, BarChart of kcal-vs-target with a dashed reference line, water total strip. Reuses the existing `?range=` toggle.
+
+### Bottom nav
+
+`pomodoro-food` slot: variants `[Pomodoro, Food]`. Alt-icon underlay (Phase 15.5) shows a Utensils ghost behind the Timer icon (or vice versa). All cycling behavior inherited from Phase 15.4.
+
+### PWA
+
+`public/sw.js` VERSION `v17 → v18`. SHELL adds `/food`.
+
+### Files created (28 new)
+
+Migration + seed script (2), schema.ts update, `src/lib/food-meta.ts`, `src/db/queries/food.ts`, `src/app/actions/food.ts`, `/api/page/food/[date]/route.ts`, `/api/food-search/route.ts`, `/food/page.tsx`, `/food/[date]/{page,loading}.tsx`, 7 client components under `_components/`, `settings/_components/nutrition-profile-card.tsx`, `insights/_components/{nutrition-section,nutrition-in-range-chart}.tsx`. Plus modifications to `sw.js`, `bottom-nav.tsx`, `settings/page.tsx`, `insights/page.tsx`, `more/page.tsx`, `db/schema.ts`, `sync/dispatch.ts`, `sync/mutate.ts`.
+
+### Local verification
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` → 0 errors, 61 warnings (existing exemption pattern).
+- Migration `0021_food_tracker` applied to `local.db`.
+- 65 seed rows inserted via `node scripts/seed-foods.mjs local`.
+- `npm run build` not yet run locally (dev server has the `.next` dir); Vercel will build authoritatively on deploy.
+
+### Ship steps (when user green-lights)
+
+1. `git push origin main` (single commit).
+2. `npm run db:migrate` against prod Turso (`.env.production.local`) — applies 0021_food_tracker. Additive, safe.
+3. `node scripts/seed-foods.mjs prod` — inserts the 65 seed rows onto Turso. Idempotent (skips already-present rows).
+4. `vercel --prod --yes`.
+5. PWA `habit-log-v18` activates on next SW lifecycle.
+
+### Deferred within Phase 16 (surfaced in the ship report)
+
+- **Recipe builder dialog UI** — backend + schema + actions all in place; the user-facing "assemble a dish from ingredients" builder isn't wired yet.
+- **Calendar popover** on the food date stepper (matches journal / habits / goals pattern). Plain chevron stepper for MVP.
+- **Favorite starring on global seed rows** — needs a per-user favorites join table; today only user-owned foods can be starred.
+
+### Standing scope decisions (from the plan)
+
+- No barcode scanning.
+- No body measurements.
+- No meal/water reminders.
+- No AI features (recipe suggestion, meal plan, photo recognition, coach chat).
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
