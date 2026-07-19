@@ -1628,6 +1628,41 @@ All planned core todo functionality is built and committed locally (not pushed).
 
 ---
 
+## ✅ Phase 14 · Ship — Todo Parts 1–10 to prod + Claude Code scaffold
+
+Shipped 2026-07-19. Migration-first session after ~7-week gap; user shifted development from Claude-in-VS-Code to standalone Claude Code CLI.
+
+**Shipped:**
+- **Prod Turso migrated** — 5 additive migrations applied via `drizzle-kit migrate` w/ `.env.production.local` loaded (parser pattern from Phase 5): `0016_todo_core`, `0017_todo_tags`, `0018_todo_sections`, `0019_todo_completions`, `0020_todo_filters`.
+- **12 commits pushed** to `origin/main` (`1655494 → fb28459`) — all 10 Todo Parts + `chore(claude-code): project settings + slash commands` (`b829202`) + `docs: refresh README to reflect all shipped features` (`fb28459`).
+- **Vercel prod deployed** — `dpl_BPVh5dGw5g63u5c4aS9M2FvPgoum` READY, aliased to https://daily-journal-phi-vert.vercel.app.
+- **Claude Code scaffold** landed under `Habit_Log/.claude/`:
+  - `settings.json` — `bypassPermissions` mode + `additionalDirectories` for parent Experiments dir + global user config.
+  - `commands/*.md` — seven slash commands: `/dev`, `/check`, `/migrate-prod`, `/seed-prod`, `/deploy`, `/ship`, `/progress-update`. Each pauses at the deploy boundary per `feedback_wait_before_deploy.md`.
+  - `.gitignore` — `.claude/settings.local.json` ignored (personal); `settings.json` + `commands/` tracked so other machines inherit the setup.
+- **README.md refreshed** — was stuck at Phase 3 scope. Now covers Todo, Books, Auth, XP+levels, gym split/exercise/set tracking, per-user data scoping, offline-first sync architecture (Phase 8), instant-nav SWR client shells (Phase 8C). Shell examples swapped to PowerShell.
+
+**Verified post-deploy (prod probes):**
+- `/` → 307 (middleware auth gate)
+- `/auth/login` → 200 (roster)
+- `/auth/signup` → 200
+- `/manifest.webmanifest` → 200
+- `/sw.js` → 200
+
+**Session mechanics:**
+- Vercel CLI token had expired — user ran `vercel login` (device-code flow) in their own terminal before deploy could retry.
+- User now runs `npm run dev` in their own PowerShell terminal (not spawned as a Claude bg task). Auto-memory `feedback_auto_start_dev_habitlog.md` flipped from "auto-start" to "do NOT spawn — user owns dev process". Reason: standalone Claude Code CLI's Bash tool has no persistent terminal panel, so a bg-task dev server is less visible than an owned terminal.
+
+**State at session end (2026-07-19):**
+- Working tree clean. Local + remote `main` at `fb28459`.
+- Prod Turso schema through `0020_todo_filters`. Prod Vercel serving Phase 14 (Parts 1–10) code.
+- PWA shell `habit-log-v16` — SHELL already includes `/todo` + `/todo/today` from Part 1.
+- Dev server runs in user's own terminal (not spawned).
+
+**Resume here for next session:** Todo feature core complete + shipped. Pick from the standing deferred list (pomodoro "focus from task", web push reminders, Eisenhower/Calendar drag-to-set, duration Gantt, 3D avatar, AI reflections, JSON export/import, fts5 search, level-up toasts, Books polish).
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
