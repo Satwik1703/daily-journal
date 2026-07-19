@@ -117,6 +117,21 @@ import {
   updateSet,
   deleteSet,
 } from "@/app/actions/gym";
+import {
+  createFood,
+  updateFood,
+  deleteFood,
+  favoriteFood,
+  logFood,
+  updateFoodLog,
+  deleteFoodLog,
+  logWater,
+  deleteWaterLog,
+  updateNutritionProfile,
+  setMealCategories,
+  createRecipe,
+  deleteRecipe,
+} from "@/app/actions/food";
 
 type AnyAction = (input: never) => Promise<unknown>;
 
@@ -243,6 +258,20 @@ export const DISPATCH: Record<string, AnyAction> = {
   create_filter: createFilter,
   update_filter: updateFilter,
   delete_filter: (args: { id: string }) => deleteFilter(args.id),
+  // food tracker
+  create_food: createFood,
+  update_food: updateFood,
+  delete_food: (args: { id: string }) => deleteFood(args.id),
+  favorite_food: favoriteFood,
+  log_food: logFood,
+  update_food_log: updateFoodLog,
+  delete_food_log: (args: { id: string }) => deleteFoodLog(args.id),
+  log_water: logWater,
+  delete_water_log: (args: { id: string }) => deleteWaterLog(args.id),
+  update_nutrition_profile: updateNutritionProfile,
+  set_meal_categories: setMealCategories,
+  create_recipe: createRecipe,
+  delete_recipe: (args: { id: string }) => deleteRecipe(args.id),
 };
 
 export type MutationKind = keyof typeof DISPATCH;

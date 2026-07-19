@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Users,
   ListTodo,
+  Utensils,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/context";
@@ -26,6 +27,12 @@ const items: MoreItem[] = [
     label: "Todo",
     description: "Lists, due dates, priorities — quick natural-language capture.",
     Icon: ListTodo,
+  },
+  {
+    href: "/food",
+    label: "Food",
+    description: "Calorie + macro tracking, water, meal-by-meal log.",
+    Icon: Utensils,
   },
   {
     href: "/insights",

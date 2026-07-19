@@ -9,6 +9,8 @@ import {
   getExercises,
   getSplitExercises,
 } from "@/db/queries/gym";
+import { getLatestBodyWeight } from "@/db/queries/body-weight";
+import { getNutritionProfile } from "@/db/queries/food";
 import { requireUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,10 @@ import { ExercisesManager } from "./_components/exercises-manager";
 import { DevicesCard } from "./_components/devices-card";
 import { OwnerRecoveryCard } from "./_components/owner-recovery-card";
 import { OwnerPassphrasesCard } from "./_components/owner-passphrases-card";
+import {
+  NutritionProfileCard,
+  MealCategoriesEditor,
+} from "./_components/nutrition-profile-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -36,6 +42,8 @@ export default async function SettingsPage() {
     splits,
     exercises,
     joins,
+    nutritionProfile,
+    latestWeight,
   ] = await Promise.all([
     getActiveQuestions(user.id),
     getArchivedQuestions(user.id),
@@ -45,6 +53,8 @@ export default async function SettingsPage() {
     getSplits(user.id, true),
     getExercises(user.id, true),
     getSplitExercises(user.id),
+    getNutritionProfile(user.id),
+    getLatestBodyWeight(user.id),
   ]);
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
@@ -60,6 +70,13 @@ export default async function SettingsPage() {
       {user.isOwner ? <OwnerRecoveryCard /> : null}
 
       {user.isOwner ? <OwnerPassphrasesCard /> : null}
+
+      <NutritionProfileCard
+        initial={nutritionProfile}
+        currentWeightKg={latestWeight?.weightKg ?? null}
+      />
+
+      <MealCategoriesEditor initial={nutritionProfile.mealCategories} />
 
       <QuestionsManager active={active} archived={archived} />
 

@@ -103,6 +103,30 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("settings");
   }
   if (
+    kind === "create_food" ||
+    kind === "update_food" ||
+    kind === "delete_food" ||
+    kind === "favorite_food" ||
+    kind === "create_recipe" ||
+    kind === "delete_recipe"
+  ) {
+    keys.push("food:*");
+    keys.push("food-library");
+  }
+  if (kind === "log_food" || kind === "update_food_log" || kind === "delete_food_log") {
+    if (a.date) keys.push(`food:${a.date}`);
+    keys.push("food:*");
+  }
+  if (kind === "log_water" || kind === "delete_water_log") {
+    if (a.date) keys.push(`food:${a.date}`);
+    keys.push("food:*");
+  }
+  if (kind === "update_nutrition_profile" || kind === "set_meal_categories") {
+    keys.push("food:*");
+    keys.push("nutrition-profile");
+    keys.push("settings");
+  }
+  if (
     kind === "create_todo" ||
     kind === "update_todo" ||
     kind === "toggle_todo" ||

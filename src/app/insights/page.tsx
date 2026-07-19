@@ -27,6 +27,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Flame } from "lucide-react";
 import { addDays, todayLocal, firstOfMonth } from "@/lib/dates";
 import { getJournalMonthStatus } from "@/db/queries/journal-month";
+import {
+  getFoodDailyTotals,
+  getNutritionProfile,
+  getWaterDailyTotals,
+} from "@/db/queries/food";
+import { NutritionSection } from "./_components/nutrition-section";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +74,13 @@ export default async function InsightsPage({
   const journalStatusByDate = await getJournalMonthStatus(user.id, monthsStart, monthsEnd);
 
   const xpByHabit = await getXpByHabit(user.id);
+
+  // Phase 16 · Nutrition insights section.
+  const [foodDaily, waterDaily, nutritionProfile] = await Promise.all([
+    getFoodDailyTotals(user.id, addDays(today, -(range - 1)), today),
+    getWaterDailyTotals(user.id, addDays(today, -(range - 1)), today),
+    getNutritionProfile(user.id),
+  ]);
   const pomoStreak = computeStreaks(allPomoDates);
   const perDateMap = buildPerDateMap(pomoWindow.daily);
   // Serialize the Map<string, DayCategoryAgg> in each daily row so the
@@ -303,6 +316,13 @@ export default async function InsightsPage({
       </Card>
 
       <HabitsXpCard habits={allActiveHabits} xpByHabit={xpByHabit} />
+
+      <NutritionSection
+        daily={foodDaily}
+        target={nutritionProfile.dailyKcalTarget}
+        water={waterDaily}
+        waterTarget={nutritionProfile.waterTargetMl}
+      />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, CheckSquare, Target, Timer, Menu, Dumbbell, ListTodo } from "lucide-react";
+import { BookOpen, CheckSquare, Target, Timer, Menu, Dumbbell, ListTodo, Utensils } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { listPending } from "@/lib/sync/queue";
 
@@ -37,9 +37,10 @@ const SLOTS: NavSlot[] = [
     ],
   },
   {
-    id: "pomodoro",
+    id: "pomodoro-food",
     variants: [
       { href: "/pomodoro", label: "Pomodoro", matchPrefix: "/pomodoro", Icon: Timer },
+      { href: "/food", label: "Food", matchPrefix: "/food", Icon: Utensils },
     ],
   },
   {

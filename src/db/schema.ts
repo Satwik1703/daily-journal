@@ -739,3 +739,157 @@ export const todoFilters = sqliteTable(
   },
   (t) => [index("todo_filters_user").on(t.userId)],
 );
+
+// ============================================================================
+// Phase 16 — Calorie Tracker (food logging, water, nutrition profile)
+// ============================================================================
+
+// Foods master. `userId` NULL = global seed row shared across all users.
+// `source` distinguishes seed / user-created / Open Food Facts import.
+export const foods = sqliteTable(
+  "foods",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    name: text("name").notNull(),
+    brand: text("brand"),
+    category: text("category"),
+    servingUnit: text("serving_unit", {
+      enum: ["g", "ml", "serving", "piece", "cup"],
+    }).notNull(),
+    servingSize: real("serving_size").notNull(),
+    kcal: real("kcal").notNull(),
+    proteinG: real("protein_g").notNull().default(0),
+    carbsG: real("carbs_g").notNull().default(0),
+    fatG: real("fat_g").notNull().default(0),
+    fiberG: real("fiber_g"),
+    sugarG: real("sugar_g"),
+    sodiumMg: real("sodium_mg"),
+    source: text("source", { enum: ["seed", "custom", "off"] })
+      .notNull()
+      .default("seed"),
+    offBarcode: text("off_barcode"),
+    isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    index("foods_user_name").on(t.userId, t.name),
+    index("foods_source").on(t.source),
+  ],
+);
+
+// One row per food eaten. `foodName` denormalized so deleting a food doesn't
+// wipe the log.
+export const foodLogs = sqliteTable(
+  "food_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    date: text("date").notNull(),
+    mealType: text("meal_type").notNull(),
+    foodId: text("food_id"),
+    foodName: text("food_name").notNull(),
+    quantity: real("quantity").notNull().default(1),
+    kcal: real("kcal").notNull(),
+    proteinG: real("protein_g").notNull().default(0),
+    carbsG: real("carbs_g").notNull().default(0),
+    fatG: real("fat_g").notNull().default(0),
+    note: text("note"),
+    loggedAt: integer("logged_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("food_logs_user_date").on(t.userId, t.date)],
+);
+
+export const waterLogs = sqliteTable(
+  "water_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    date: text("date").notNull(),
+    amountMl: real("amount_ml").notNull(),
+    loggedAt: integer("logged_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("water_logs_user_date").on(t.userId, t.date)],
+);
+
+// Per-user macro budget + meal categories. Meal categories are a JSON array
+// of strings so the user can rename/reorder without a schema migration.
+export const nutritionProfile = sqliteTable("nutrition_profile", {
+  userId: text("user_id").primaryKey(),
+  heightCm: real("height_cm"),
+  age: integer("age"),
+  sex: text("sex", { enum: ["male", "female", "other"] }),
+  activityLevel: text("activity_level", {
+    enum: ["sedentary", "light", "moderate", "active", "very_active"],
+  })
+    .notNull()
+    .default("moderate"),
+  goal: text("goal", { enum: ["lose", "maintain", "gain"] })
+    .notNull()
+    .default("maintain"),
+  rateKgPerWeek: real("rate_kg_per_week"),
+  targetWeightKg: real("target_weight_kg"),
+  targetDate: text("target_date"),
+  dailyKcalTarget: real("daily_kcal_target"),
+  proteinTargetG: real("protein_target_g"),
+  carbsTargetG: real("carbs_target_g"),
+  fatTargetG: real("fat_target_g"),
+  waterTargetMl: real("water_target_ml").notNull().default(2500),
+  mealCategoriesJson: text("meal_categories_json")
+    .notNull()
+    .default('["Breakfast","Lunch","Snacks","Dinner"]'),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+// User-authored recipes. The aggregate macro totals are recomputed on save so
+// the picker sheet doesn't have to re-derive from items on every render.
+export const foodRecipes = sqliteTable(
+  "food_recipes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    emoji: text("emoji"),
+    servings: real("servings").notNull().default(1),
+    totalKcal: real("total_kcal").notNull().default(0),
+    totalProteinG: real("total_protein_g").notNull().default(0),
+    totalCarbsG: real("total_carbs_g").notNull().default(0),
+    totalFatG: real("total_fat_g").notNull().default(0),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("food_recipes_user").on(t.userId)],
+);
+
+export const foodRecipeItems = sqliteTable(
+  "food_recipe_items",
+  {
+    id: text("id").primaryKey(),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references((): AnySQLiteColumn => foodRecipes.id, { onDelete: "cascade" }),
+    foodId: text("food_id")
+      .notNull()
+      .references((): AnySQLiteColumn => foods.id, { onDelete: "cascade" }),
+    quantity: real("quantity").notNull().default(1),
+    unit: text("unit"),
+  },
+  (t) => [index("food_recipe_items_recipe").on(t.recipeId)],
+);
