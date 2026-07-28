@@ -128,6 +128,24 @@ function cacheKeysFor(kind: string, args: unknown): string[] {
     keys.push("settings");
   }
   if (
+    kind === "upsert_timebox_slot" ||
+    kind === "upsert_timebox_slots_bulk" ||
+    kind === "clear_timebox_slot" ||
+    kind === "clear_timebox_slots_bulk"
+  ) {
+    if (a.date) keys.push(`timebox:${a.date}`);
+    keys.push("timebox:*");
+  }
+  if (
+    kind === "create_timebox_category" ||
+    kind === "update_timebox_category" ||
+    kind === "delete_timebox_category" ||
+    kind === "reorder_timebox_categories"
+  ) {
+    keys.push("timebox:*");
+    keys.push("settings");
+  }
+  if (
     kind === "create_todo" ||
     kind === "update_todo" ||
     kind === "toggle_todo" ||

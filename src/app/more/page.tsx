@@ -8,6 +8,7 @@ import {
   Users,
   ListTodo,
   Utensils,
+  CalendarClock,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/context";
@@ -33,6 +34,12 @@ const items: MoreItem[] = [
     label: "Food",
     description: "Calorie + macro tracking, water, meal-by-meal log.",
     Icon: Utensils,
+  },
+  {
+    href: "/timebox",
+    label: "Timebox",
+    description: "24h × 30-min slot log. See where your time actually goes.",
+    Icon: CalendarClock,
   },
   {
     href: "/insights",

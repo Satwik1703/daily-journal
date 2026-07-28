@@ -33,6 +33,8 @@ import {
   getWaterDailyTotals,
 } from "@/db/queries/food";
 import { NutritionSection } from "./_components/nutrition-section";
+import { getTimeboxCategories, getTimeboxRangeAgg } from "@/db/queries/timebox";
+import { TimeboxSection } from "./_components/timebox-section";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +82,12 @@ export default async function InsightsPage({
     getFoodDailyTotals(user.id, addDays(today, -(range - 1)), today),
     getWaterDailyTotals(user.id, addDays(today, -(range - 1)), today),
     getNutritionProfile(user.id),
+  ]);
+
+  // Phase 17 · Timebox insights section.
+  const [timeboxCats, timeboxAgg] = await Promise.all([
+    getTimeboxCategories(user.id),
+    getTimeboxRangeAgg(user.id, addDays(today, -(range - 1)), today),
   ]);
   const pomoStreak = computeStreaks(allPomoDates);
   const perDateMap = buildPerDateMap(pomoWindow.daily);
@@ -322,6 +330,13 @@ export default async function InsightsPage({
         target={nutritionProfile.dailyKcalTarget}
         water={waterDaily}
         waterTarget={nutritionProfile.waterTargetMl}
+      />
+
+      <TimeboxSection
+        categories={timeboxCats}
+        byDay={timeboxAgg.byCategoryPerDay}
+        totalsPerCategory={timeboxAgg.totalsPerCategory}
+        totalMinutes={timeboxAgg.totalMinutes}
       />
     </div>
   );

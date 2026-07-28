@@ -132,6 +132,16 @@ import {
   createRecipe,
   deleteRecipe,
 } from "@/app/actions/food";
+import {
+  upsertTimeboxSlot,
+  upsertTimeboxSlotsBulk,
+  clearTimeboxSlot,
+  clearTimeboxSlotsBulk,
+  createTimeboxCategory,
+  updateTimeboxCategory,
+  deleteTimeboxCategory,
+  reorderTimeboxCategories,
+} from "@/app/actions/timebox";
 
 type AnyAction = (input: never) => Promise<unknown>;
 
@@ -273,6 +283,15 @@ export const DISPATCH: Record<string, AnyAction> = {
   set_meal_categories: setMealCategories,
   create_recipe: createRecipe,
   delete_recipe: (args: { id: string }) => deleteRecipe(args.id),
+  // timebox
+  upsert_timebox_slot: upsertTimeboxSlot,
+  upsert_timebox_slots_bulk: upsertTimeboxSlotsBulk,
+  clear_timebox_slot: clearTimeboxSlot,
+  clear_timebox_slots_bulk: clearTimeboxSlotsBulk,
+  create_timebox_category: createTimeboxCategory,
+  update_timebox_category: updateTimeboxCategory,
+  delete_timebox_category: (args: { id: string }) => deleteTimeboxCategory(args.id),
+  reorder_timebox_categories: reorderTimeboxCategories,
 };
 
 export type MutationKind = keyof typeof DISPATCH;

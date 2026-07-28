@@ -912,3 +912,54 @@ export const foodFavorites = sqliteTable(
     index("food_favorites_food").on(t.foodId),
   ],
 );
+
+// ============================================================================
+// Phase 17 — Timebox (24h × 30min slot logging)
+// ============================================================================
+
+export const timeboxCategories = sqliteTable(
+  "timebox_categories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    emoji: text("emoji"),
+    color: text("color").notNull().default("#8b5cf6"),
+    position: integer("position").notNull().default(0),
+    // Optional link to a pomodoro category — used by pomo auto-fill to know
+    // which timebox category to overlay on the calendar for that session.
+    pomoCategoryId: text("pomo_category_id"),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [index("timebox_categories_user").on(t.userId)],
+);
+
+// One row per filled slot. Composite PK (userId, date, slotIndex) so upsert
+// = drop-in replace. Missing rows = empty slot.
+export const timeboxSlots = sqliteTable(
+  "timebox_slots",
+  {
+    userId: text("user_id").notNull(),
+    date: text("date").notNull(),
+    slotIndex: integer("slot_index").notNull(),
+    categoryId: text("category_id"),
+    label: text("label"),
+    note: text("note"),
+    source: text("source", { enum: ["manual", "auto-pomo"] })
+      .notNull()
+      .default("manual"),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.date, t.slotIndex] }),
+    index("timebox_slots_user_date").on(t.userId, t.date),
+  ],
+);

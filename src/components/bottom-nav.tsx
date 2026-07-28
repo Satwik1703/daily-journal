@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, CheckSquare, Target, Timer, Menu, Dumbbell, ListTodo, Utensils } from "lucide-react";
+import { BookOpen, CheckSquare, Target, Timer, Menu, Dumbbell, ListTodo, Utensils, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { listPending } from "@/lib/sync/queue";
 
@@ -44,8 +44,11 @@ const SLOTS: NavSlot[] = [
     ],
   },
   {
-    id: "goals",
-    variants: [{ href: "/goals", label: "Goals", matchPrefix: "/goals", Icon: Target }],
+    id: "goals-timebox",
+    variants: [
+      { href: "/goals", label: "Goals", matchPrefix: "/goals", Icon: Target },
+      { href: "/timebox", label: "Timebox", matchPrefix: "/timebox", Icon: CalendarClock },
+    ],
   },
   {
     id: "more",

@@ -50,6 +50,18 @@ export const POMODORO_LEGEND: CalendarLegend = {
   ],
 };
 
+export const TIMEBOX_LEGEND: CalendarLegend = {
+  title: "Timebox calendar",
+  blurb: "Cells color by how many 30-min slots you logged manually (auto-pomo overlays don't count).",
+  rows: [
+    { status: "crazy", label: "Crazy", meaning: "≥30 slots logged (15+ hrs)" },
+    { status: "great", label: "Great", meaning: "20–29 slots (10–14.5 hrs)" },
+    { status: "good", label: "Good", meaning: "10–19 slots (5–9.5 hrs)" },
+    { status: "avg", label: "Avg", meaning: "3–9 slots" },
+    { status: "bad", label: "Bad", meaning: "1–2 slots" },
+  ],
+};
+
 export const FOOD_LEGEND: CalendarLegend = {
   title: "Food calendar",
   blurb: "Cells color by how close your day's kcal came to the target from your nutrition profile.",

@@ -11,6 +11,7 @@ import {
 } from "@/db/queries/gym";
 import { getLatestBodyWeight } from "@/db/queries/body-weight";
 import { getNutritionProfile } from "@/db/queries/food";
+import { getTimeboxCategories } from "@/db/queries/timebox";
 import { requireUser } from "@/lib/auth/context";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ import {
   NutritionProfileCard,
   MealCategoriesEditor,
 } from "./_components/nutrition-profile-card";
+import { TimeboxCategoriesManager } from "./_components/timebox-categories-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -56,6 +58,7 @@ export default async function SettingsPage() {
     getNutritionProfile(user.id),
     getLatestBodyWeight(user.id),
   ]);
+  const timeboxCategories = await getTimeboxCategories(user.id);
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-8 space-y-5">
       <div>
@@ -81,6 +84,11 @@ export default async function SettingsPage() {
       <QuestionsManager active={active} archived={archived} />
 
       <PomodoroCategoriesManager active={pomoActive} archived={pomoArchived} />
+
+      <TimeboxCategoriesManager
+        initial={timeboxCategories}
+        pomoCategories={pomoActive.map((c) => ({ id: c.id, name: c.name, emoji: c.emoji }))}
+      />
 
       <SplitsManager splits={splits} exercises={exercises} joins={joins} />
 
