@@ -1943,6 +1943,88 @@ Migration + seed script (2), schema.ts update, `src/lib/food-meta.ts`, `src/db/q
 
 ---
 
+## 🚧 Phase 17 — Timebox tab (LOCAL ONLY, awaiting user test)
+
+24-hour timeboxing tab, 48 slots × 30 min each. Purpose: user answers "where does my day go?" by logging what happened in each 30-min block. Autocomplete-first entry, category chips, multi-select, pomo auto-fill, "where your time actually goes" insights. Committed locally 2026-07-19 — not pushed / not deployed.
+
+Plan: `C:\Users\Admin\.claude\plans\let-s-build-timebox-tab.md`.
+
+### Answered before build
+
+1. **48 slots × 30 min = full 24h** (user overrode the default 6 AM–12 AM proposal).
+2. **Pomo auto-fill = yes**, sessions round up to 60 min and occupy 2 slots regardless of the underlying 25/50 min pomo length.
+3. **Categories** — 8 seeded per user: Work, Study, Create, Exercise, Meal, Sleep, Break, **Self-care** (brushing/bathing/routine).
+4. **Description field** on slots = yes, optional 400-char `note`.
+5. **Autocomplete = crazy good** (spec below).
+
+### Schema — `0023_timebox.sql`
+
+- `timebox_categories` — per-user, optional `pomo_category_id` link, position for drag-reorder.
+- `timebox_slots` — composite PK `(user_id, date, slot_index)`; `category_id? / label? / note? / source (manual|auto-pomo)`.
+
+Applied to local `local.db`. First read of `getTimeboxCategories` lazy-seeds the 8 defaults for a new user.
+
+### Client-side friction-free entry
+
+- **Primary big-bar** at top of the page (large primary-tinted input). Always targets the current-live slot (or "next empty" on past dates). Type + Enter = logged. `Autocomplete` component with prefix/substring match, time-of-day weight, category scope, decayed-frequency ranking, and a color-tinted category badge on every suggestion.
+- **Category chips** sticky along the bottom. **Tap** = fill current slot with that category (+ category name as default label). **Long-press** = catch-up-fill every empty slot from your last log through now with that category — perfect for filling in an hour later.
+- **Slot long-press** enters multi-select. Tap more slots to add. `MultiSelectBar` at the bottom (replaces category chips) — pick a category + optional label + Enter to apply to all N slots at once.
+- **Slot tap** opens the `SlotEditorSheet` — full label+category+note edit, autocomplete included, Clear button.
+- **Pomo auto-fill ghost overlay** — computed CLIENT-SIDE from the user's `pomodoro_sessions`. Snaps DOWN to slot boundary, expands to at least 60 minutes (2 slots). Rendered subtle (opacity 0.6, italic, "auto" badge). Manual entries always override. Tap a ghost → promotes it to a manual entry.
+- **Now-marker** — active slot ringed in primary; live pill in the header updates every 30s.
+
+### Autocomplete ranker (`src/lib/timebox-meta.ts::rankLabels`)
+
+```
+base   = count × (0.5 + decayed_recency × 0.5)   half-life 14 days
++40    prefix match on query
++20    non-prefix substring match
++25    active category matches label's most-common category
++15×w  time-of-day: mode slot within ±4, w scales linearly
+hard exclude if query non-empty and no substring match
+```
+
+Preloaded via `/api/page/timebox/[date]` → `labelStats: LabelStat[]` (≤200 rows, `count / lastUsedTs / mostCommonCategoryId / mostCommonSlotIndex`). All keystroke-time ranking runs client-side — no network lag.
+
+### Pomo auto-fill mapping
+
+Priority order for choosing the timebox category of a pomo overlay:
+1. Explicit link via `timebox_categories.pomo_category_id` (user sets in Settings → Timebox categories editor).
+2. Case-insensitive name match (e.g. pomo cat "Work" → timebox cat "Work").
+3. None — ghost renders uncategorized w/ label = pomo description.
+
+### Nav / PWA / /more
+
+- Bottom-nav `goals-timebox` slot: cycles `[Goals, Timebox]` with `CalendarClock` alt-icon ghost. All Phase 15.4 cycling + ripple + persistence infra inherited.
+- PWA `public/sw.js` bumped `v18 → v19`; SHELL adds `/timebox`.
+- `/more` card added (fallback for users who haven't discovered the long-press cycle).
+
+### Insights section — "Where your time goes"
+
+- Stacked BarChart (recharts) — hours per category × day, categories in their configured colors.
+- Ranked list — hours + % per category for the range.
+- Uses the existing `?range=` toggle.
+
+### Verified locally
+
+- `npx tsc --noEmit` clean.
+- `npm run lint` — 0 errors, 74 warnings (existing exemption pattern).
+- Migration `0023_timebox` applied to `local.db`.
+- 8 default categories auto-seed on first `/timebox` load for a user with none.
+
+### Ship steps (when user green-lights)
+
+1. `git push origin main` (2 commits — code + PROGRESS.md).
+2. `npm run db:migrate` against prod Turso — applies `0023_timebox`. Additive, safe.
+3. `vercel --prod --yes`.
+4. PWA `habit-log-v19` activates on next SW lifecycle.
+
+### Not deferred
+
+Everything the user asked for shipped: 24h slots, pomo auto-fill (60-min snap), category set incl. Self-care for daily routine, description field, crazy-good autocomplete.
+
+---
+
 ## Standing reminders
 
 - **Session hygiene:** start a fresh Claude session at the top of each new work session. `AGENTS.md` + `PROGRESS.md` auto-load and brief the new session.
