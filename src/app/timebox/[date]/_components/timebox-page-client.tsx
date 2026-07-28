@@ -300,6 +300,24 @@ export function TimeboxPageClient({ date }: { date: string }) {
     return n;
   }, [slotById]);
 
+  // Auto-scroll to (now - 2 hours) once the payload lands. Runs once per
+  // page load; user can freely scroll after.
+  const didAutoScrollRef = useRef(false);
+  useEffect(() => {
+    if (didAutoScrollRef.current) return;
+    if (!isToday || !data) return;
+    const target = Math.max(0, nowSlot - 4);
+    const el = document.querySelector<HTMLElement>(
+      `[data-slot-index="${target}"]`,
+    );
+    if (!el) return;
+    // Use rAF so the layout has settled after the first render pass.
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
+      didAutoScrollRef.current = true;
+    });
+  }, [isToday, data, nowSlot]);
+
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-40">
       <TimeboxDateStepper date={date} />
@@ -383,8 +401,9 @@ export function TimeboxPageClient({ date }: { date: string }) {
         </div>
       )}
 
-      {/* Sticky category chips */}
-      {data ? (
+      {/* Sticky category chips — hidden while multi-select is active
+          (MultiSelectBar takes over the same position). */}
+      {data && selected.size === 0 ? (
         <CategoryChips
           categories={data.categories}
           activeCategoryId={activeCategoryId}
@@ -413,6 +432,12 @@ export function TimeboxPageClient({ date }: { date: string }) {
           slot={slotById.get(editingSlot) ?? null}
           categories={data.categories}
           stats={data.labelStats}
+          slotAbove={editingSlot > 0 ? (slotById.get(editingSlot - 1) ?? null) : null}
+          slotBelow={
+            editingSlot < SLOTS_PER_DAY - 1
+              ? (slotById.get(editingSlot + 1) ?? null)
+              : null
+          }
           onClose={() => setEditingSlot(null)}
         />
       ) : null}

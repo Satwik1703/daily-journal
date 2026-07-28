@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { mutate } from "@/lib/sync/mutate";
 import {
   formatSlotLabel,
+  SLOTS_PER_DAY,
   type LabelStat,
   type TimeboxCategory,
   type TimeboxSlot,
@@ -20,6 +21,8 @@ export function SlotEditorSheet({
   slot,
   categories,
   stats,
+  slotAbove,
+  slotBelow,
   onClose,
 }: {
   date: string;
@@ -27,6 +30,10 @@ export function SlotEditorSheet({
   slot: TimeboxSlot | null;
   categories: TimeboxCategory[];
   stats: LabelStat[];
+  /** Adjacent slots for the "Copy from above/below" quick actions. Null
+   *  when the adjacent slot doesn't exist (edges) or is empty. */
+  slotAbove: TimeboxSlot | null;
+  slotBelow: TimeboxSlot | null;
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(slot?.label ?? "");
@@ -38,6 +45,13 @@ export function SlotEditorSheet({
     setCategoryId(slot?.categoryId ?? null);
     setNote(slot?.note ?? "");
   }, [slot?.label, slot?.categoryId, slot?.note]);
+
+  function copyFrom(other: TimeboxSlot) {
+    setLabel(other.label ?? "");
+    setCategoryId(other.categoryId);
+    setNote(other.note ?? "");
+    toast.success("Copied — press Save to keep");
+  }
 
   function save() {
     void mutate("upsert_timebox_slot", {
@@ -69,6 +83,42 @@ export function SlotEditorSheet({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          {/* Copy-from-adjacent quick actions */}
+          {(slotAbove || slotBelow) && slotIndex >= 0 && slotIndex < SLOTS_PER_DAY ? (
+            <div className="flex gap-1.5">
+              {slotAbove ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => copyFrom(slotAbove)}
+                  className="flex-1 justify-start gap-1 text-xs"
+                  title={`Copy from ${formatSlotLabel(slotIndex - 1)}`}
+                >
+                  <ArrowUp className="size-3" />
+                  <span className="truncate">
+                    Copy from {slotAbove.label ?? "above"}
+                  </span>
+                </Button>
+              ) : null}
+              {slotBelow ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => copyFrom(slotBelow)}
+                  className="flex-1 justify-start gap-1 text-xs"
+                  title={`Copy from ${formatSlotLabel(slotIndex + 1)}`}
+                >
+                  <ArrowDown className="size-3" />
+                  <span className="truncate">
+                    Copy from {slotBelow.label ?? "below"}
+                  </span>
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
           {/* Category picker */}
           <div>
             <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">

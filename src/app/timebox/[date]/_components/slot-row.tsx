@@ -105,6 +105,7 @@ export function SlotRow({
   return (
     <button
       type="button"
+      data-slot-index={slotIndex}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
@@ -113,6 +114,7 @@ export function SlotRow({
       onContextMenu={(e) => e.preventDefault()}
       onClick={onClick}
       aria-label={`${formatSlotLabel(slotIndex)}${label ? ` — ${label}` : " — empty"}`}
+      style={{ scrollMarginTop: "180px" }}
       className={cn(
         "group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors select-none",
         "touch-manipulation",

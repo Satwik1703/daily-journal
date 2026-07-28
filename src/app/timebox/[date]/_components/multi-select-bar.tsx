@@ -57,8 +57,8 @@ export function MultiSelectBar({
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="mx-auto max-w-2xl px-4 py-2 space-y-2">
+    <div className="pointer-events-auto fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-30 border-t border-border bg-background/95 backdrop-blur">
+      <div className="mx-auto max-w-2xl px-3 py-2 space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-xs">
             <span className="rounded bg-primary/15 px-1.5 py-px font-medium text-primary">
@@ -79,14 +79,14 @@ export function MultiSelectBar({
         </div>
 
         {/* Category chips — tap = apply to selection */}
-        <div className="flex gap-1.5 overflow-x-auto">
+        <div className="flex flex-wrap gap-1.5">
           {categories.map((c) => (
             <button
               key={c.id}
               type="button"
               onClick={() => apply(label || c.name, c.id)}
               className={cn(
-                "shrink-0 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                "rounded-full border px-2.5 py-1 text-xs transition-colors",
                 categoryId === c.id
                   ? "border-transparent"
                   : "border-border hover:bg-muted/60",

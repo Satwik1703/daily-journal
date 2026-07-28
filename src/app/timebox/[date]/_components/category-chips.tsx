@@ -30,8 +30,8 @@ export function CategoryChips({
 }) {
   return (
     <div className="pointer-events-auto fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-30 border-t border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto max-w-2xl overflow-x-auto px-3 py-2">
-        <div className="flex gap-1.5">
+      <div className="mx-auto max-w-2xl px-3 py-2">
+        <div className="flex flex-wrap gap-1.5">
           {categories.map((c) => (
             <Chip
               key={c.id}
@@ -45,7 +45,7 @@ export function CategoryChips({
             <button
               type="button"
               onClick={onManageOpen}
-              className="shrink-0 rounded-full border border-dashed border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted/50"
+              className="rounded-full border border-dashed border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted/50"
             >
               +
             </button>
