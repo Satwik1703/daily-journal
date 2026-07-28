@@ -57,7 +57,7 @@ export function MultiSelectBar({
   }
 
   return (
-    <div className="pointer-events-auto fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-30 border-t border-border bg-background/95 backdrop-blur">
+    <div className="pointer-events-auto fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-30 border-t border-border bg-background/95 backdrop-blur">
       <div className="mx-auto max-w-2xl px-3 py-2 space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-xs">

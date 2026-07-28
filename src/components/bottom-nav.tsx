@@ -180,11 +180,15 @@ export function BottomNav() {
     <>
       <nav
         className={cn(
-          "fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/85 backdrop-blur",
+          "fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur",
           "pb-[env(safe-area-inset-bottom)]",
         )}
       >
-        <ul className="mx-auto flex max-w-3xl items-stretch justify-around">
+        {/* Fixed inner height so bottom bars in child pages can align to
+            it exactly (`bottom-[calc(4rem+env(safe-area-inset-bottom))]`)
+            with zero gap. Don't shrink this without updating the bar
+            offsets in category-chips.tsx + multi-select-bar.tsx. */}
+        <ul className="mx-auto flex max-w-3xl h-16 items-stretch justify-around">
           {SLOTS.map((slot) => {
             const modeIdx = modes[slot.id] ?? 0;
             const currentVariant = slot.variants[Math.min(modeIdx, slot.variants.length - 1)];

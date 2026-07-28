@@ -1943,7 +1943,7 @@ Migration + seed script (2), schema.ts update, `src/lib/food-meta.ts`, `src/db/q
 
 ---
 
-## 🚧 Phase 17 — Timebox tab (LOCAL ONLY, awaiting user test)
+## ✅ Phase 17 — Timebox tab
 
 24-hour timeboxing tab, 48 slots × 30 min each. Purpose: user answers "where does my day go?" by logging what happened in each 30-min block. Autocomplete-first entry, category chips, multi-select, pomo auto-fill, "where your time actually goes" insights. Committed locally 2026-07-19 — not pushed / not deployed.
 
@@ -2022,6 +2022,15 @@ Priority order for choosing the timebox category of a pomo overlay:
 ### Not deferred
 
 Everything the user asked for shipped: 24h slots, pomo auto-fill (60-min snap), category set incl. Self-care for daily routine, description field, crazy-good autocomplete.
+
+### Polish pass (after first user test)
+
+- **Chip bars wrap** (both `CategoryChips` and `MultiSelectBar`) — `flex-wrap`, no horizontal scroller. Matches the pomodoro category picker pattern.
+- **Auto-scroll to (now − 2h)** on load — target the slot at `nowSlot - 4`, respect a `scroll-margin-top: 180px` on the SlotRow so the sticky header doesn't hide it. Runs once per page load via `didAutoScrollRef`.
+- **Same-position bottom bars, no gap under nav** — `BottomNav` inner `<ul>` pinned to `h-16` so both bars can align to `bottom-[calc(4rem+env(safe-area-inset-bottom))]` with zero gap. Nav bg opacity bumped `/85 → /95` to match the bars. `layout.tsx` main-padding aligned to the same value.
+- **Copy from above / below** in `SlotEditorSheet` — two outline buttons at top of the dialog with `ArrowUp`/`ArrowDown` icons and the adjacent slot's label; populates label + category + note (Save required to commit).
+- Chips hide entirely when a multi-select is active so the two bars never fight for the same slot.
+- User-tweaked button copy from "Copy from X" → "Copy - X".
 
 ---
 

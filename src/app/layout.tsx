@@ -56,7 +56,7 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <main className="flex-1 pb-[calc(4.5rem+env(safe-area-inset-bottom))]">
+          <main className="flex-1 pb-[calc(4rem+env(safe-area-inset-bottom))]">
             {children}
           </main>
           <BottomNav />

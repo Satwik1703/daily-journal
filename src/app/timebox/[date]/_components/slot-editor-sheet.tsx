@@ -93,11 +93,11 @@ export function SlotEditorSheet({
                   size="sm"
                   onClick={() => copyFrom(slotAbove)}
                   className="flex-1 justify-start gap-1 text-xs"
-                  title={`Copy from ${formatSlotLabel(slotIndex - 1)}`}
+                  title={`Copy - ${formatSlotLabel(slotIndex - 1)}`}
                 >
                   <ArrowUp className="size-3" />
                   <span className="truncate">
-                    Copy from {slotAbove.label ?? "above"}
+                    Copy - {slotAbove.label ?? "above"}
                   </span>
                 </Button>
               ) : null}
@@ -108,11 +108,11 @@ export function SlotEditorSheet({
                   size="sm"
                   onClick={() => copyFrom(slotBelow)}
                   className="flex-1 justify-start gap-1 text-xs"
-                  title={`Copy from ${formatSlotLabel(slotIndex + 1)}`}
+                  title={`Copy - ${formatSlotLabel(slotIndex + 1)}`}
                 >
                   <ArrowDown className="size-3" />
                   <span className="truncate">
-                    Copy from {slotBelow.label ?? "below"}
+                    Copy - {slotBelow.label ?? "below"}
                   </span>
                 </Button>
               ) : null}

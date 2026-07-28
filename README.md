@@ -1,6 +1,6 @@
 # Habit Log
 
-A personal daily-life PWA: journal, habits with XP + levels, pomodoro focus timer, goals with cascading rollups, gym tracker with body heatmap, reading log, and a full TickTick-style todo manager. Multi-user with emoji-passphrase login. Mobile-first, offline-first, installable. Built day-by-day with Claude Code; full progress log in [`PROGRESS.md`](./PROGRESS.md).
+A personal daily-life PWA: journal, habits with XP + levels, pomodoro focus timer, goals with cascading rollups, gym tracker with body heatmap, reading log, TickTick-style todo manager, calorie tracker, and a 24h × 30-min timeboxing tab. Multi-user with emoji-passphrase login. Mobile-first, offline-first, installable. Built day-by-day with Claude Code; full progress log in [`PROGRESS.md`](./PROGRESS.md).
 
 **Live:** https://daily-journal-phi-vert.vercel.app
 
@@ -18,7 +18,9 @@ A personal daily-life PWA: journal, habits with XP + levels, pomodoro focus time
 - **Insights** (`/insights`) — mood/energy/sleep trend chart, habit completion %, habit timeline, streaks, gratitude word cloud, XP levels card ranking every habit, Focus section (minutes/day chart, category trend, top categories, best time-of-day, focus heatmap), Journal-at-a-glance month grid. Range toggle (7 / 15 / 30 / 90 days).
 - **Gym** (`/gym`, `/gym/[date]`, `/gym/insights`) — splits with exercises, per-set reps + weight logging with debounced writes, stepper ladder for reps, per-user default gym cloned from owner on signup. Body heatmap shades each muscle group by recent training intensity (front + back).
 - **Books** (`/books`) — reading log with status buckets (Reading / Wishlist / Finished / DNF), rating, total-pages progress bars derived from `habit_value_logs` linked to the active book, active-book chip in the Log-value dialog on the Read habit.
-- **More** (`/more`) — hub for Insights / Gym / Books / Todo / Settings.
+- **Food** (`/food/[date]`) — HealthifyMe-lite calorie tracker. Configurable meal categories (default Breakfast/Lunch/Snacks/Dinner), 65-row seed of Indian + global foods, Open Food Facts fallback for anything else, custom foods, recipe builder (assemble a dish from ingredients — logs as one row), per-user favorites (on seed rows too via `food_favorites` join), water tracker, daily kcal/macros summary against a target from your Nutrition profile (BMR × activity + goal). Calendar popover on the date stepper colors by kcal-vs-target buckets. Insights section: BarChart of kcal vs. dashed target line, avg + streak + water total.
+- **Timebox** (`/timebox/[date]`) — 24h × 48 slots (30 min each). Autocomplete-first entry: primary big-bar at top always targets the current live slot, type + Enter = logged. Sticky bottom category chip bar — tap fills current slot, long-press catch-up-fills every empty slot from your last log through now with that category. Long-press any slot → multi-select → apply category + label to all N slots at once. Slot tap opens editor sheet (label / category picker / 400-char note / Clear / Copy from above or below). Pomo sessions auto-fill matching slots as ghost overlays (snap-down to slot boundary, expand to 60 min). Autocomplete ranker weights recent + frequent + time-of-day + active-category-scope + prefix/substring match. Insights section — "Where your time goes" stacked bar per day + ranked hours+% per category.
+- **More** (`/more`) — hub for Insights / Gym / Books / Todo / Food / Timebox / Settings.
 - **Settings** (`/settings`) — daily journal questions (drag-reorder), pomodoro categories (drag-reorder), completion sound, device list with rename, sync-status panel with per-row retry / discard, owner-only cards (all passphrases viewer + friend-recovery code issuer).
 - **Auth** — multi-user with floating-tile roster on `/auth/login` (physics-based drift + cursor repel + recency aura), 4-emoji + 24-emoji-carousel passphrase, honeypot emoji, 4-step signup ritual (name → style → lock → doodle), doodle-based self-serve recovery (DTW-matched stroke), owner-issued 6-digit friend recovery codes, master recovery code for the owner. Per-user data scoping across all 17 data tables.
 
@@ -89,10 +91,12 @@ Service worker at `public/sw.js` ships a `VERSION` constant — **bump it on eve
 
 ## Bottom nav — long-press cycling
 
-The bottom nav shows 5 tabs: **Journal · Habits · Pomodoro · Goals · More**. Two of them are *cycling slots* — long-press (500ms) swaps the tab's identity persistently:
+The bottom nav shows 5 tabs: **Journal · Habits · Pomodoro · Goals · More**. Four of them are *cycling slots* — long-press (500ms) swaps the tab's identity persistently:
 
 - **Journal ↔ Gym** — long-press the Journal tab to swap it to Gym. Short-tap now goes to Gym. Long-press again to cycle back.
 - **Habits ↔ Todo** — same, swaps between Habits and Todo.
+- **Pomodoro ↔ Food** — long-press for the calorie tracker.
+- **Goals ↔ Timebox** — long-press for the 30-min slot logger.
 
 Long-press fires a portal-rendered ripple that expands from the tapped icon to cover the viewport as the new page loads under it. Alt-icon ghost in the corner of each cycling tab shows the "other side" (dims idle, brightens on hold).
 
